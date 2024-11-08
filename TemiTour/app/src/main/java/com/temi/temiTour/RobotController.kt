@@ -2,15 +2,20 @@ package com.temi.temiTour
 
 import android.util.Log
 import com.robotemi.sdk.Robot
+import com.robotemi.sdk.SttLanguage
 import com.robotemi.sdk.listeners.OnRobotReadyListener
 import com.robotemi.sdk.listeners.OnDetectionStateChangedListener
 import com.robotemi.sdk.listeners.OnDetectionDataChangedListener
 import com.robotemi.sdk.listeners.OnMovementStatusChangedListener
 import com.robotemi.sdk.listeners.OnRobotLiftedListener
 import com.robotemi.sdk.listeners.OnRobotDragStateChangedListener
+import com.robotemi.sdk.listeners.OnTtsVisualizerWaveFormDataChangedListener
+import com.robotemi.sdk.listeners.OnConversationStatusChangedListener
+import com.robotemi.sdk.listeners.OnGoToLocationStatusChangedListener
 import com.robotemi.sdk.TtsRequest
 import com.robotemi.sdk.constants.HardButton
 import com.robotemi.sdk.model.DetectionData
+import com.robotemi.sdk.navigation.model.Position
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -56,6 +61,48 @@ data class Dragged(
 data class Lifted(
     val state: Boolean
 )
+data class AskResult(
+    val result: String
+)
+data class WakeUp(
+    val result: String
+)
+data class WaveForm(
+    val result: ByteArray
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as WaveForm
+
+        return result.contentEquals(other.result)
+    }
+
+    override fun hashCode(): Int {
+        return result.contentHashCode()
+    }
+}
+data class ConversationStatus (
+    val status: Int,
+    val text: String
+)
+data class ConversationAttached (
+    val isAttached: Boolean
+)
+enum class LocationState(val value:String) {
+    START(value = "start"),
+    CALCULATING(value = "calculating"),
+    GOING(value = "going"),
+    COMPLETE(value = "complete"),
+    ABORT(value = "abort"),
+    REPOSING(value = "reposing");
+
+    companion object {
+        fun fromLocationState(value: String): LocationState? = LocationState.entries.find { it.value == value }
+    }
+}
+
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -72,7 +119,13 @@ class RobotController():
     OnDetectionDataChangedListener,
     OnMovementStatusChangedListener,
     OnRobotLiftedListener,
-    OnRobotDragStateChangedListener
+    OnRobotDragStateChangedListener,
+    Robot.AsrListener,
+    Robot.WakeupWordListener,
+    OnTtsVisualizerWaveFormDataChangedListener,
+    OnConversationStatusChangedListener,
+    Robot.ConversationViewAttachesListener,
+    OnGoToLocationStatusChangedListener
 {
     private val robot = Robot.getInstance() //This is needed to reference the data coming from Temi
 
@@ -99,6 +152,24 @@ class RobotController():
     private val _lifted = MutableStateFlow(Lifted(false))
     val lifted = _lifted.asStateFlow() // This can include talking state as well
 
+    private val _askResult = MutableStateFlow(AskResult(" "))
+    val askResult = _askResult.asStateFlow()
+
+    private val _wakeUp = MutableStateFlow(WakeUp("56"))
+    val wakeUp = _wakeUp.asStateFlow()
+
+    private val _waveform = MutableStateFlow(WaveForm(byteArrayOf(0)))
+    val waveform = _waveform.asStateFlow()
+
+    private val _conversationStatus = MutableStateFlow(ConversationStatus(status = 0, text = "56"))
+    val conversationStatus = _conversationStatus.asStateFlow()
+
+    private val _conversationAttached = MutableStateFlow(ConversationAttached(false))
+    val conversationAttached = _conversationAttached.asStateFlow()
+
+    private val _locationState = MutableStateFlow(LocationState.ABORT)
+    val locationState = _locationState.asStateFlow()
+
     init {
         robot.addOnRobotReadyListener(this)
         robot.addTtsListener(this)
@@ -107,8 +178,12 @@ class RobotController():
         robot.addOnMovementStatusChangedListener(this)
         robot.addOnRobotLiftedListener(this)
         robot.addOnRobotDragStateChangedListener(this)
-
-//        robot.setTrackUserOn()
+        robot.addAsrListener(this)
+        robot.addWakeupWordListener(this)
+        robot.addOnTtsVisualizerWaveFormDataChangedListener(this)
+        robot.addOnConversationStatusChangedListener(this)
+        robot.addConversationViewAttachesListener(this)
+        robot.addOnGoToLocationStatusChangedListener(this)
     }
     //********************************* General Functions
     suspend fun speak(speech: String, buffer: Long) {
@@ -116,7 +191,7 @@ class RobotController():
         val request = TtsRequest.create(
             speech = speech,
             isShowOnConversationLayer = false,
-            showAnimationOnly = false,
+            showAnimationOnly = true,
         ) // Need to create TtsRequest
         robot.speak(request)
         delay(buffer)
@@ -136,6 +211,31 @@ class RobotController():
 
     fun listOfLocations() {
         Log.i("HOPE!", robot.locations.toString())
+        Log.i("HOPE!", robot.wakeupWord)
+        Log.i("HOPE!", robot.wakeupWordDisabled.toString())
+    }
+
+    fun goTo(location: String) {
+        robot.goTo(location, noBypass = false)
+    }
+
+    fun goToPosition(position: Position) {
+        robot.goToPosition(position)
+    }
+
+    fun askQuestion(question: String) {
+        robot.askQuestion(question)
+    }
+
+    fun wakeUp() {
+        robot.wakeup()
+    }
+
+    fun finishConversation() {
+        robot.finishConversation()
+    }
+    fun getPosition(): Position {
+        return robot.getPosition()
     }
 
     // Move these outside the function to maintain state across calls
@@ -204,6 +304,7 @@ class RobotController():
             }
         }
     }
+
     //********************************* General Data
     fun getPositionYaw(): Float
     {
@@ -234,6 +335,10 @@ class RobotController():
         robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.ENABLED)
         robot.setHardButtonMode(HardButton.POWER, HardButton.Mode.ENABLED)
         robot.showTopBar()
+
+        robot.requestToBeKioskApp()
+        robot.setKioskModeOn(false)
+        Log.i("HOPE!", " In kiosk: ${robot.isKioskModeOn().toString()}")
     }
 
     override fun onTtsStatusChanged(ttsRequest: TtsRequest) {
@@ -288,6 +393,47 @@ class RobotController():
     override fun onRobotDragStateChanged(isDragged: Boolean) {
         _dragged.update {
             Dragged(isDragged)
+        }
+    }
+
+    override fun onAsrResult(asrResult: String, sttLanguage: SttLanguage) {
+        _askResult.update {
+            AskResult(asrResult)
+        }
+    }
+
+    override fun onWakeupWord(wakeupWord: String, direction: Int) {
+        _wakeUp.update {
+            WakeUp(wakeupWord)
+        }
+    }
+
+    override fun onTtsVisualizerWaveFormDataChanged(waveForm: ByteArray) {
+        _waveform.update {
+            WaveForm(waveForm)
+        }
+    }
+
+    override fun onConversationStatusChanged(status: Int, text: String) {
+        _conversationStatus.update {
+            ConversationStatus(status, text)
+        }
+    }
+
+    override fun onConversationAttaches(isAttached: Boolean) {
+        _conversationAttached.update {
+            ConversationAttached(isAttached)
+        }
+    }
+
+    override fun onGoToLocationStatusChanged(
+        location: String,
+        status: String,
+        descriptionId: Int,
+        description: String
+    ) {
+        _locationState.update {
+            LocationState.fromLocationState(value = status) ?: return@update it
         }
     }
 }

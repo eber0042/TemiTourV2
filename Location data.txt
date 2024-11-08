@@ -1,0 +1,13 @@
+[home base: Position(x=-0.394113, y=-8.668232, yaw=-0.070925, tiltAngle=45)
+r410 front door: Position(x=-2.131615, y=-3.744513, yaw=2.981772, tiltAngle=19)
+r412, r405, 
+trophy cabinet 1, 
+r417, 
+r416, 
+pokemon robot, 
+r410 back door, 
+award exit, 
+me, 
+me3]
+
+// Position(x=-1.858921, y=-8.655042, yaw=-3.06656, tiltAngle=19) <- This is the position I want for the idle mode
