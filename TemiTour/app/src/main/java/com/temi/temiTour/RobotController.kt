@@ -368,6 +368,9 @@ class RobotController():
         }
     }
 
+    fun stopMovement() {
+        robot.stopMovement()
+    }
     //********************************* Override is below
     /**
      * Called when connection with robot was established.

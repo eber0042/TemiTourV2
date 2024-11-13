@@ -213,7 +213,9 @@ class MainViewModel @Inject constructor(
         "deviceMoved" to false
     )
     private var repeatSpeechFlag: Boolean = false
-    private var interruptTriggerDelay = 5
+    private var talkingInThreadFlag = false
+    private var repeatGoToFlag: Boolean = false
+    private var interruptTriggerDelay = 2
 
     private suspend fun idleSystem(idle: Boolean) {
         while (idle) {
@@ -272,32 +274,6 @@ class MainViewModel @Inject constructor(
         robotController.setCliffSensorOn(sensorOn)
     }
 
-    private suspend fun goTo(
-        location: String,
-        speak: String? = null,
-        haveFace: Boolean = true,
-        backwards: Boolean = false
-    ) {
-        speak(speak, false, haveFace = haveFace)
-        while (true) { // loop until to makes it to the start location
-            //Log.i("DEBUG!", "ONE")
-
-            robotController.goTo(location, backwards)
-            buffer()
-            Log.i("DEBUG!", "one " + goToLocationState.value)
-            conditionGate({ goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT })
-
-            Log.i("DEBUG!", "two " + goToLocationState.value)
-            if (goToLocationState != LocationState.ABORT) {
-                break
-            }
-            buffer()
-
-        }
-        //Log.i("DEBUG!", "THREE")
-        if (speak != null) conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-    }
-
     private fun stateFinished() {
         isTourStateFinished = true
         stateMode = State.NULL
@@ -307,21 +283,21 @@ class MainViewModel @Inject constructor(
         stateMode = state
     }
 
-//    private suspend fun speak(
-//        speak: String?,
-//        setConditionGate: Boolean = true,
-//        haveFace: Boolean = true
-//    ) {
-//        if (speak != null) {
-//            robotController.speak(
-//                speak,
-//                buffer,
-//                haveFace
-//            )
-//            if (setConditionGate) conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-//        }
-//
-//    }
+    private suspend fun basicSpeak(
+        speak: String?,
+        setConditionGate: Boolean = true,
+        haveFace: Boolean = true
+    ) {
+        if (speak != null) {
+            robotController.speak(
+                speak,
+                buffer,
+                haveFace
+            )
+            if (setConditionGate) conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+        }
+
+    }
 
     private suspend fun forcedSpeak(speak: String?) {
         while (ttsStatus.value.status != TtsRequest.Status.STARTED) {
@@ -494,6 +470,10 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    private fun stopMovement() {
+        robotController.stopMovement()
+    }
+
     private suspend fun speak(
         speak: String?,
         setConditionGate: Boolean = true,
@@ -511,32 +491,103 @@ class MainViewModel @Inject constructor(
             updateInterruptFlag("userMissing", setInterruptConditionUserMissing)
             updateInterruptFlag("userTooClose", setInterruptConditionUSerToClose)
             updateInterruptFlag("deviceMoved", setInterruptConditionDeviceMoved)
+            if (setConditionGate) {
+                for (sentence in sentences) {
+                    if (sentence.isNotBlank()) {
+                        do {
+                            // Log.i("DEBUG!", sentence)
+                            // set the repeat flag to false once used
+                            if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag = false
 
-            for (sentence in sentences) {
-                if (sentence.isNotBlank()) {
-                    do {
-                       // Log.i("DEBUG!", sentence)
-                        // set the repeat flag to false once used
-                        if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag = false
+                            // Speak each sentence individually
+                            // Log.i("DEBUG!", "repeatSpeechFlag: $repeatSpeechFlag")
+                            robotController.speak(
+                                sentence.trim(),
+                                buffer,
+                                haveFace
+                            )
 
-                        // Speak each sentence individually
-                        // Log.i("DEBUG!", "repeatSpeechFlag: $repeatSpeechFlag")
-                        robotController.speak(
-                            sentence.trim(),
-                            buffer,
-                            haveFace
-                        )
+                            // Wait for each sentence to complete before moving to the next
+                                conditionGate ({
+                                    ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
+                                })
+                        } while (repeatSpeechFlag)
+                    }
+                }
 
-                        // Wait for each sentence to complete before moving to the next
-                        if (setConditionGate) {
-                            conditionGate ({
-                                ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
-                            })
+                updateInterruptFlag("userMissing", false)
+                updateInterruptFlag("userTooClose", false)
+                updateInterruptFlag("deviceMoved", false)
+            } else {
+                viewModelScope.launch {
+                    Log.i("DEBUG!", "In the thread!s")
+                    talkingInThreadFlag = true
+                    for (sentence in sentences) {
+                        Log.i("DEBUG!", "$sentence")
+                        if (sentence.isNotBlank()) {
+                            do {
+                                // Log.i("DEBUG!", sentence)
+                                // set the repeat flag to false once used
+                                if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag = false
+
+                                // Speak each sentence individually
+                                // Log.i("DEBUG!", "repeatSpeechFlag: $repeatSpeechFlag")
+                                robotController.speak(
+                                    sentence.trim(),
+                                    buffer,
+                                    haveFace
+                                )
+
+                                // Wait for each sentence to complete before moving to the next
+                                    conditionGate ({
+                                        ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
+                                    })
+                            } while (repeatSpeechFlag)
                         }
-                    } while (repeatSpeechFlag)
+                    }
+                    talkingInThreadFlag = false
                 }
             }
+
         }
+    }
+
+//    || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved
+
+    private suspend fun goTo(
+        location: String,
+        speak: String? = null,
+        haveFace: Boolean = true,
+        backwards: Boolean = false,
+        setInterruptSystem: Boolean = false,
+        setInterruptConditionUserMissing: Boolean = false,
+        setInterruptConditionUSerToClose: Boolean = false,
+        setInterruptConditionDeviceMoved: Boolean = false
+    ) {
+        speak(speak, false, haveFace = haveFace, setInterruptSystem, setInterruptConditionUserMissing, setInterruptConditionUSerToClose, setInterruptConditionDeviceMoved) // *******************************************
+
+        updateInterruptFlag("userMissing", setInterruptConditionUserMissing)
+        updateInterruptFlag("userTooClose", setInterruptConditionUSerToClose)
+        updateInterruptFlag("deviceMoved", setInterruptConditionDeviceMoved)
+
+        while (true) { // loop until to makes it to the start location
+            //Log.i("DEBUG!", "ONE")
+
+            robotController.goTo(location, backwards)
+            buffer()
+            // Log.i("DEBUG!", "one " + goToLocationState.value)
+            conditionGate({ goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved) })
+
+            // Log.i("DEBUG!", "two " + goToLocationState.value)
+            if (goToLocationState != LocationState.ABORT && !repeatGoToFlag) {
+                break
+            }
+            if (repeatGoToFlag) repeatGoToFlag = !repeatSpeechFlag
+            buffer()
+
+        }
+        //Log.i("DEBUG!", "THREE")
+        if (speak != null) conditionGate({talkingInThreadFlag})// conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)})
 
         updateInterruptFlag("userMissing", false)
         updateInterruptFlag("userTooClose", false)
@@ -554,6 +605,8 @@ class MainViewModel @Inject constructor(
                         conditionTimer({!((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true)}, interruptTriggerDelay)
                         triggeredInterrupt = true
                         repeatSpeechFlag = true
+                        repeatGoToFlag = true
+                        stopMovement()
                     } else {
                         triggeredInterrupt = false
                     }
@@ -570,7 +623,9 @@ class MainViewModel @Inject constructor(
                         interruptFlags["userTooClose"] == true && yPosition == YDirection.CLOSE -> robotController.speak("Hey, you are too close.", buffer)
                         else -> {}
                     }
-                    conditionTimer({!triggeredInterrupt}, 5)
+                    conditionGate ({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                    conditionTimer({!triggeredInterrupt}, 1)
+
                 }
                 buffer()
             }
@@ -1162,29 +1217,13 @@ class MainViewModel @Inject constructor(
                     }
 
                     TourState.TESTING -> {
-                        speak("My name is temi. How are you. Are you doing good. Wow, that sounds great.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionDeviceMoved = true, setInterruptConditionUSerToClose = true)
+//                        speak("My name is temi. How are you. Are you doing good. Wow, that sounds great.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionDeviceMoved = true, setInterruptConditionUSerToClose = true)
+                        goToSpeed(SpeedLevel.SLOW)
+                        //speak(speak = "What do you do with a drunken sailor. Put him in the bed with the captains daughter. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
+                        goTo("me", speak = "What do you do with a drunken sailor. Shave his belly with a rusty razor. Way hay and up she rises", backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                        speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                        goTo("me3", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
                     }
-
-                    /*
-                    //                        speak("Ladies and gentlemen, esteemed apple enthusiasts, and fruit aficionados alike, today, I stand before you not just to express an opinion, but to deliver a testament, an homage, and, yes, a love letter to one of nature's finest and most versatile gifts to humankind – the apple.\n" +
-//                                "\n" +
-//                                "Where shall I begin? Perhaps with the very essence of an apple itself – its refreshing crunch, a sound that reverberates with the essence of nature, crisp and pure, as if capturing the vitality of orchards under autumn’s golden sunlight. That first bite of an apple is no mere sensation; it’s an experience, an awakening that brings with it the rich heritage of a fruit whose history stretches as far back as the ancient Silk Road. Apples have traveled alongside humanity, moving from wild groves in Kazakhstan to carefully tended orchards across continents. Today, they come to us not just as humble produce, but as ambassadors of culture, tradition, and taste.\n" +
-//                                "\n" +
-//                                "But let us not be hasty in our praise, for apples are not only about history and lineage. They offer sustenance, joy, and refreshment in ways few other fruits can. Imagine standing in an orchard on a crisp autumn day, breathing in the earthy fragrance of fallen leaves and ripened fruit, and then reaching out to pluck an apple straight from the tree. This moment, simple yet profound, is a ritual passed down through generations. And every bite is a celebration of nature’s bounty – of rain, soil, and sun, all working harmoniously to create something delightful.\n" +
-//                                "\n" +
-//                                "Now, there are those who may say, “What’s so special about apples? They’re just fruits.” But let us not reduce these wonders to mere mundanity. Consider the staggering variety of apples available: Gala, Fuji, Honeycrisp, Granny Smith, Braeburn, Pink Lady, and so many others, each offering a unique profile of flavor and texture. The Honeycrisp’s juiciness explodes with a perfect balance of sweetness and acidity, while the Granny Smith tantalizes with a tartness that’s bold, unapologetic, and invigorating. Even in their simplicity, apples find endless ways to delight. There’s no other fruit, I dare say, with such versatility. You want a snack? Grab an apple. Need a boost in fiber and vitamin C? Look no further. Craving a flavor that pairs perfectly with everything from cinnamon to cheese to walnuts? The apple delivers.\n" +
-//                                "\n" +
-//                                "But apples are more than just taste. They are symbols. An apple a day keeps the doctor away, as the saying goes, capturing not only their nutritional value but the trust we place in them for our well-being. Rich in dietary fiber and antioxidants, apples promote heart health, aid digestion, and support the immune system. When I eat an apple, I feel connected to the earth, to the very cycles of life, nourished by something as close to pure as one can find in this world.\n" +
-//                                "\n" +
-//                                "And how wonderful is the diversity of ways we enjoy them! Apples can be baked into pies, the epitome of comfort food. They can be transformed into cider, both soft and hard, offering us warmth and delight, whether shared with family or friends. In caramel-coated form, they become treats of sheer indulgence, while sliced in a salad, they add a crisp contrast that brightens any dish. Even their juice alone is a drink cherished by children and adults alike, the essence of the apple distilled into a form so simple yet so satisfying.\n" +
-//                                "\n" +
-//                                "An apple is not just a fruit; it’s a canvas. It’s adaptable, open to interpretation and reinvention, welcoming spices, sugars, and the company of other fruits with equal ease. From compotes and sauces to crisps and crumbles, apples are at home in an astonishing array of culinary creations. And let us not forget the simple beauty of a well-dried apple chip, that chewy, tangy reminder of autumn available even on the warmest summer day.\n" +
-//                                "\n" +
-//                                "My friends, we do not simply eat apples. No, we embrace them, savoring a bond between humankind and nature that stretches back thousands of years. So let us not take for granted the magic that comes from that first bite, the joy that an apple brings, and the countless ways it enriches our lives.\n" +
-//                                "\n" +
-//                                "To the apple – long may it endure as a symbol of health, vitality, and flavor! Thank you.")
-//                    }
-                     */
 
                     TourState.GET_USER_NAME -> {
                         // Stuff below gets userName
