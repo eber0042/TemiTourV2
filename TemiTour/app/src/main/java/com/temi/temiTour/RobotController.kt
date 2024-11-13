@@ -13,9 +13,15 @@ import com.robotemi.sdk.listeners.OnTtsVisualizerWaveFormDataChangedListener
 import com.robotemi.sdk.listeners.OnConversationStatusChangedListener
 import com.robotemi.sdk.listeners.OnGoToLocationStatusChangedListener
 import com.robotemi.sdk.TtsRequest
+import com.robotemi.sdk.constants.CliffSensorMode
+import com.robotemi.sdk.constants.Gender
 import com.robotemi.sdk.constants.HardButton
+import com.robotemi.sdk.constants.SensitivityLevel
+import com.robotemi.sdk.listeners.OnBeWithMeStatusChangedListener
 import com.robotemi.sdk.model.DetectionData
 import com.robotemi.sdk.navigation.model.Position
+import com.robotemi.sdk.navigation.model.SpeedLevel
+import com.robotemi.sdk.voice.model.TtsVoice
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -102,6 +108,18 @@ enum class LocationState(val value:String) {
         fun fromLocationState(value: String): LocationState? = LocationState.entries.find { it.value == value }
     }
 }
+enum class BeWithMeState(val value:String) {
+    ABORT(value = "abort"),
+    CALCULATING(value = "calculating"),
+    SEARCH(value = "search"),
+    START(value = "start"),
+    TRACK(value = "track"),
+    OBSTACLE_DETECTED(value = "obstacle detected");
+
+    companion object {
+        fun fromBeWithMeState(value: String): BeWithMeState? = BeWithMeState.entries.find { it.value == value }
+    }
+}
 
 
 @Module
@@ -125,7 +143,8 @@ class RobotController():
     OnTtsVisualizerWaveFormDataChangedListener,
     OnConversationStatusChangedListener,
     Robot.ConversationViewAttachesListener,
-    OnGoToLocationStatusChangedListener
+    OnGoToLocationStatusChangedListener,
+        OnBeWithMeStatusChangedListener
 {
     private val robot = Robot.getInstance() //This is needed to reference the data coming from Temi
 
@@ -170,6 +189,9 @@ class RobotController():
     private val _locationState = MutableStateFlow(LocationState.ABORT)
     val locationState = _locationState.asStateFlow()
 
+    private val _beWithMeStatus = MutableStateFlow(BeWithMeState.ABORT)
+    val beWithMeState = _beWithMeStatus.asStateFlow()
+
     init {
         robot.addOnRobotReadyListener(this)
         robot.addTtsListener(this)
@@ -184,14 +206,15 @@ class RobotController():
         robot.addOnConversationStatusChangedListener(this)
         robot.addConversationViewAttachesListener(this)
         robot.addOnGoToLocationStatusChangedListener(this)
+        robot.addOnBeWithMeStatusChangedListener(this)
     }
     //********************************* General Functions
-    suspend fun speak(speech: String, buffer: Long) {
+    suspend fun speak(speech: String, buffer: Long, haveFace: Boolean = true) {
         delay(buffer)
         val request = TtsRequest.create(
             speech = speech,
             isShowOnConversationLayer = false,
-            showAnimationOnly = true,
+            showAnimationOnly = haveFace,
         ) // Need to create TtsRequest
         robot.speak(request)
         delay(buffer)
@@ -210,17 +233,26 @@ class RobotController():
     }
 
     fun listOfLocations() {
-        Log.i("HOPE!", robot.locations.toString())
+        Log.i("INFO!", robot.locations.toString())
         Log.i("HOPE!", robot.wakeupWord)
         Log.i("HOPE!", robot.wakeupWordDisabled.toString())
     }
 
-    fun goTo(location: String) {
-        robot.goTo(location, noBypass = false)
+    fun goTo(location: String, backwards: Boolean = false) {
+        robot.goTo(location, noBypass = false, backwards = backwards)
+    }
+
+    fun setGoToSpeed(speedLevel: SpeedLevel) {
+        robot.goToSpeed = speedLevel
     }
 
     fun goToPosition(position: Position) {
         robot.goToPosition(position)
+    }
+
+    suspend fun skidJoy(x: Float, y: Float) {
+        robot.skidJoy(x, y)
+        delay(500)
     }
 
     fun askQuestion(question: String) {
@@ -314,6 +346,28 @@ class RobotController():
     fun volumeControl (volume: Int) {
         robot.volume = volume
     }
+
+    fun setMainButtonMode(isEnabled: Boolean) {
+        if (isEnabled){
+            robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.ENABLED)
+        } else {
+            robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.DISABLED)
+        }
+    }
+
+    fun setCliffSensorOn(sensorOn: Boolean) {
+        robot.groundDepthCliffDetectionEnabled = sensorOn
+        robot.frontTOFEnabled = sensorOn
+        robot.backTOFEnabled = sensorOn
+        if (sensorOn) {
+            robot.cliffSensorMode = CliffSensorMode.HIGH_SENSITIVITY
+            robot.headDepthSensitivity = SensitivityLevel.HIGH
+        } else {
+            robot.cliffSensorMode = CliffSensorMode.OFF
+            robot.headDepthSensitivity = SensitivityLevel.LOW
+        }
+    }
+
     //********************************* Override is below
     /**
      * Called when connection with robot was established.
@@ -323,18 +377,27 @@ class RobotController():
     override fun onRobotReady(isReady: Boolean) {
 
         if (!isReady) return
+
+        // robot.cliffSensorMode = CliffSensorMode.HIGH_SENSITIVITY
+        setCliffSensorOn(true)
+
+        Log.i("DEBUG!", "Cliff Enabled " + robot.groundDepthCliffDetectionEnabled.toString())
+        Log.i("DEBUG!", "Cliff Enabled " + robot.cliffSensorMode.toString())
+
+        robot.setTtsVoice(ttsVoice = TtsVoice(Gender.FEMALE, 1.1F, 4))
         robot.setDetectionModeOn(on = true, distance = 2.0f) // Set how far it can detect stuff
         robot.setKioskModeOn(on = false)
-        robot.volume = 0// set volume to 4
-//        robot.setHardButtonMode(HardButton.VOLUME, HardButton.Mode.DISABLED)
-//        robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.DISABLED)
-//        robot.setHardButtonMode(HardButton.POWER, HardButton.Mode.DISABLED)
-//        robot.hideTopBar()
+        robot.volume = 4// set volume to 4
 
-        robot.setHardButtonMode(HardButton.VOLUME, HardButton.Mode.ENABLED)
-        robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.ENABLED)
+        robot.setHardButtonMode(HardButton.VOLUME, HardButton.Mode.DISABLED)
+        robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.DISABLED)
+//        robot.setHardButtonMode(HardButton.POWER, HardButton.Mode.DISABLED)
+        robot.hideTopBar()
+
+//        robot.setHardButtonMode(HardButton.VOLUME, HardButton.Mode.ENABLED)
+//        robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.ENABLED)
         robot.setHardButtonMode(HardButton.POWER, HardButton.Mode.ENABLED)
-        robot.showTopBar()
+//        robot.showTopBar()
 
         robot.requestToBeKioskApp()
         robot.setKioskModeOn(false)
@@ -434,6 +497,12 @@ class RobotController():
     ) {
         _locationState.update {
             LocationState.fromLocationState(value = status) ?: return@update it
+        }
+    }
+
+    override fun onBeWithMeStatusChanged(status: String) {
+        _beWithMeStatus.update {
+            BeWithMeState.fromBeWithMeState(value = status) ?: return@update it
         }
     }
 }

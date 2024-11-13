@@ -4,10 +4,15 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.robotemi.sdk.TtsRequest
+import com.robotemi.sdk.constants.HardButton
 import com.robotemi.sdk.navigation.model.Position
+import com.robotemi.sdk.navigation.model.SpeedLevel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.regex.Pattern
 import javax.inject.Inject
 import kotlin.math.*
 
@@ -56,10 +61,22 @@ enum class XMovement {
 }
 
 enum class TourState {
+    START_LOCATION,
     IDLE,
+    ALTERNATE_START,
+    RAMP,
     STAGE_1,
+    STAGE_1_B,
     STAGE_1_1,
-    TERMINATE
+    STAGE_1_1_B,
+    STAGE_1_2,
+    STAGE_1_2_B,
+    TOUR_END,
+    TERMINATE,
+    NULL,
+    TESTING,
+    GET_USER_NAME,
+    TEMI_V2
 }
 
 @HiltViewModel
@@ -80,13 +97,14 @@ class MainViewModel @Inject constructor(
     private val conversationStatus = robotController.conversationStatus
     private val conversationAttached = robotController.conversationAttached
     private val locationState = robotController.locationState
+    private val beWithMeStatus = robotController.beWithMeState
 
 
     private val buffer = 100L // Used to create delay need to unsure systems work
     private var stateMode = State.NULL // Keep track of system state
-    private val defaultAngle =
+    private var defaultAngle =
         0.0 // 180 + round(Math.toDegrees(robotController.getPositionYaw().toDouble())) // Default angle Temi will go to.
-    private val boundary = 90.0 // Distance Temi can turn +/- the default angle
+    private var boundary = 90.0 // Distance Temi can turn +/- the default angle
     private var userRelativeDirection =
         XDirection.GONE // Used for checking direction user was lost
 
@@ -101,6 +119,27 @@ class MainViewModel @Inject constructor(
     private var yPosition = YDirection.MISSING
     private var yMotion = YMovement.NOWHERE
 
+    public var playMusic = false
+
+    // StateFlow for controlling whether to play a GIF or static image
+    private val _shouldPlayGif = MutableStateFlow(true)
+    val shouldPlayGif: StateFlow<Boolean> = _shouldPlayGif
+
+    // StateFlow for holding the current image resource
+    private val _imageResource = MutableStateFlow(R.drawable.oip)
+    val image: StateFlow<Int> = _imageResource
+
+    // Function to update the image resource
+    fun updateImageResource(resourceId: Int) {
+        _imageResource.value = resourceId
+    }
+
+    // Function to toggle the GIF state
+    fun toggleGif() {
+        _shouldPlayGif.value = !_shouldPlayGif.value
+    }
+
+    //******************************************** Stuff for the tour
     // key word lists
     private val confirmation = listOf(
         "yes", "sure", "okay", "I’m in", "count me in", "definitely",
@@ -148,281 +187,595 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    // ************************************************************************************************ STUFF FOR THE TOUR
     // Keep track of the systems current state
-    private var tourState = TourState.IDLE
+    private var tourState = TourState.NULL
+    private var isTourStateFinished = false
+
     private var speechUpdatedValue: String? = null
+    private var userResponse: String? = null
 
-    init {
-        // script for Temi for the Tour
-        viewModelScope.launch {
-            // robotController.goTo("r410 front door")
-            while (false) {
-                buffer()
-            } // set this an run to turn of the program
-            // This is the initialisation for the tour, should only be run through once
-            robotController.listOfLocations()
-            var isAttached = false
-            var goToLocationState = LocationState.ABORT
-            var movementState = MovementStatus.ABORT
+    private var isAttached = false
+    private var goToLocationState = LocationState.ABORT
+    private var movementState = MovementStatus.ABORT
 
-            // variables used for setting the position checker against thresholds
-            val targetPosition =
-                Position(x = -1.858921F, y = -8.655042F, yaw = -3.06656F, tiltAngle = 19)
-            val checker = PositionChecker(
-                targetPosition,
-                xThreshold = 0.2F,
-                yThreshold = 0.2F,
-                yawThreshold = 0.2F
-            )
+    private var shouldExit = false // Flag to determine if both loops should exit
 
-            var userResponse: String? = null
-            val job = launch {
-                conversationAttached.collect { status ->
-                    isAttached = status.isAttached
-                }
-            }
+    private var userName: String? = null
 
-            val job1 = launch {
-                locationState.collect { value ->
-                    goToLocationState = value
-                    //Log.i("START!", "$goToLocationState")
-                }
-            }
+    private var followState = BeWithMeState.CALCULATING
+    
+    private var triggeredInterrupt: Boolean = false
+    // Define a mutable map to hold interrupt flags
+    private val interruptFlags = mutableMapOf(
+        "userMissing" to false,
+        "userTooClose" to false,
+        "deviceMoved" to false
+    )
+    private var repeatSpeechFlag: Boolean = false
+    private var interruptTriggerDelay = 5
 
-            val job2 = launch {
-                movementStatus.collect { value ->
-                    movementState = value.status
-                    // Log.i("START!", "$movementState")
-                }
-            }
-
-            // System is to issue warnings to not interfere with the Temi during testing
-            /*
-                        val job2 = launch {
-                var warningIssued = false
-                while(true) {
-                    if (xPosition != XDirection.GONE) {
-                        robotController.speak("Hi there, I am Temi. I am currently under going testing. Please stay out of my way.", buffer)
-                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                        warningIssued = true
-                        conditionTimer({ xPosition == XDirection.GONE }, time = 20)
-                        if (xPosition != XDirection.GONE) {
-                            robotController.speak("Sorry, but may you please not interfere with my testing", buffer)
-                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                            conditionTimer({ xPosition == XDirection.GONE }, time = 50)
-                        }
-                    } else if (warningIssued) {
-                        robotController.speak("Thank you for your cooperation", buffer)
-                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                        warningIssued = false
-                    }
-                    buffer()
-                }
-            }
-             */
-
-
-            var shouldExit = false // Flag to determine if both loops should exit
-
+    private suspend fun idleSystem(idle: Boolean) {
+        while (idle) {
             buffer()
-            // Going to location for starting the tour
-            Log.i("START!", robotController.getPosition().toString())
-            if (!checker.isApproximatelyClose(robotController.getPosition())) {
+        } // set this and run to turn of the program
+    }
+
+    private suspend fun initiateTour() {
+        // This is the initialisation for the tour, should only be run through once
+        robotController.listOfLocations()
+
+        goToSpeed(SpeedLevel.HIGH)
+        userName = null
+
+        val job = viewModelScope.launch {
+            conversationAttached.collect { status ->
+                isAttached = status.isAttached
+            }
+        }
+
+        val job1 = viewModelScope.launch {
+            locationState.collect { value ->
+                goToLocationState = value
+                //Log.i("START!", "$goToLocationState")
+            }
+        }
+
+        val job2 = viewModelScope.launch {
+            movementStatus.collect { value ->
+                movementState = value.status
+                // Log.i("START!", "$movementState")
+            }
+        }
+
+        val job3 = viewModelScope.launch {
+            beWithMeStatus.collect { value ->
+                followState = value
+                // Log.i("START!", "$movementState")
+            }
+        }
+
+//        job.cancel()
+//        job1.cancel()
+//        job2.cancel()
+        // job3.cancel()
+    }
+
+    private suspend fun tourState(newTourState: TourState) {
+        tourState = newTourState
+        Log.i("INFO!", "$tourState")
+        conditionGate({ !isTourStateFinished })
+        isTourStateFinished = false
+    }
+
+    private suspend fun  setCliffSensorOn(sensorOn: Boolean) {
+        robotController.setCliffSensorOn(sensorOn)
+    }
+
+    private suspend fun goTo(
+        location: String,
+        speak: String? = null,
+        haveFace: Boolean = true,
+        backwards: Boolean = false
+    ) {
+        speak(speak, false, haveFace = haveFace)
+        while (true) { // loop until to makes it to the start location
+            //Log.i("DEBUG!", "ONE")
+
+            robotController.goTo(location, backwards)
+            buffer()
+            Log.i("DEBUG!", "one " + goToLocationState.value)
+            conditionGate({ goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT })
+
+            Log.i("DEBUG!", "two " + goToLocationState.value)
+            if (goToLocationState != LocationState.ABORT) {
+                break
+            }
+            buffer()
+
+        }
+        //Log.i("DEBUG!", "THREE")
+        if (speak != null) conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+    }
+
+    private fun stateFinished() {
+        isTourStateFinished = true
+        stateMode = State.NULL
+    }
+
+    private fun stateMode(state: State) {
+        stateMode = state
+    }
+
+//    private suspend fun speak(
+//        speak: String?,
+//        setConditionGate: Boolean = true,
+//        haveFace: Boolean = true
+//    ) {
+//        if (speak != null) {
+//            robotController.speak(
+//                speak,
+//                buffer,
+//                haveFace
+//            )
+//            if (setConditionGate) conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+//        }
+//
+//    }
+
+    private suspend fun forcedSpeak(speak: String?) {
+        while (ttsStatus.value.status != TtsRequest.Status.STARTED) {
+            if (speak != null) {
                 robotController.speak(
-                    "I am not currently at the tour start spot. Going there now.",
+                    speak,
                     buffer
                 )
+            }
+            buffer()
+        }
+        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+    }
 
-                while (true) { // loop until to makes it to the start location
-                    robotController.goTo("tour start spot")
-                    delay(1000L)
-                    conditionGate({ goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT })
+    private suspend fun listen() {
+        robotController.wakeUp() // This will start the listen mode
+        conditionGate({ isAttached }) // Wait until listen mode completed
+
+        // Make sure the speech value is updated before using it
+        userResponse =
+            speechUpdatedValue // Store the text from listen mode to be used
+        speechUpdatedValue =
+            null // clear the text to null so show that it has been used
+    }
+
+    private suspend fun turnBy(degree: Int) {
+        robotController.turnBy(degree, buffer = buffer)
+        conditionGate({ movementState != MovementStatus.COMPLETE && movementState != MovementStatus.ABORT })
+    }
+
+    private fun setMainButtonMode(isEnabled: Boolean) {
+        robotController.setMainButtonMode(isEnabled)
+    }
+
+    private suspend fun getUseConfirmation(
+        initialQuestion: String? = null,
+        rejected: String? = null,
+        afterRejectedDelay: Long = 0L,
+        confirmed: String? = null,
+        notUnderstood: String? = null,
+        ignored: String? = null,
+        exitCase: (suspend () -> Unit)? = null
+    ) {
+        shouldExit = false
+
+        while (true) {
+            if (xPosition != XDirection.GONE) { // Check if there is a user present
+                // Check if there is an initial question
+                speak(initialQuestion)
+
+                while (true) {
+                    listen()
+
+                    when { // Condition gate based on what the user says
+                        containsPhraseInOrder(userResponse, reject, true) -> {
+                            speak(rejected)
+                            delay(afterRejectedDelay)
+                            break
+                        }
+
+                        containsPhraseInOrder(userResponse, confirmation, true) -> {
+                            speak(confirmed)
+                            shouldExit = true
+                            break
+                        }
+
+                        else -> {
+                            if (yPosition != YDirection.MISSING) {
+
+                                speak(notUnderstood)
+
+                            } else {
+
+                                forcedSpeak(ignored)
+
+                                break
+                            }
+                        }
+                    }
+                    buffer()
+                }
+
+                if (shouldExit) {
+                    exitCase?.invoke() // Calls exitCase if it’s not null
+                    break
+                }
+
+            }
+            buffer()
+        }
+    }
+
+    private suspend fun exitCaseCheckIfUserClose(
+        notClose: String? = null,
+        close: String? = null
+    ) {
+        while (true) {
+            if (yPosition != YDirection.CLOSE) {
+                if (!notClose.isNullOrEmpty()) {
+                    speak(notClose)
+                }
+                break
+            } else {
+                if (!close.isNullOrEmpty()) {
+                    speak(close)
+                }
+                conditionTimer(
+                    { yPosition != YDirection.CLOSE },
+                    time = 50
+                )
+                if (yPosition != YDirection.CLOSE) {
+                    robotController.speak(" Thank you", buffer)
                     conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                    if (goToLocationState != LocationState.ABORT) {
-                        break
+                }
+            }
+        }
+    }
+
+    private fun extractName(userResponse: String): String? {
+        // Define common patterns for introducing names
+        val namePatterns = listOf(
+            "my name is ([A-Za-z]+)",  // e.g., "My name is John"
+            "i am ([A-Za-z]+)",        // e.g., "I am Alice"
+            "it's ([A-Za-z]+)",        // e.g., "It's Bob"
+            "this is ([A-Za-z]+)",     // e.g., "This is Sarah"
+            "call me ([A-Za-z]+)",     // e.g., "Call me Mike"
+            "name is ([A-Za-z]+)",
+            "is ([A-Za-z]+)",
+            "me ([A-Za-z]+)",
+            "i ([A-Za-z]+)",
+            "am ([A-Za-z]+)"
+        )
+
+        // Iterate over each pattern to try to match the user's response
+        for (pattern in namePatterns) {
+            val regex = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE)
+            val matcher = regex.matcher(userResponse)
+
+            // If a pattern matches, return the extracted name
+            if (matcher.find()) {
+                return matcher.group(1) // The name will be in the first capturing group
+            }
+        }
+
+        // If no pattern matches, check if the userResponse is a single word and return it
+        val singleWordPattern = Pattern.compile("^[A-Za-z]+$", Pattern.CASE_INSENSITIVE)
+        val singleWordMatcher = singleWordPattern.matcher(userResponse.trim())
+
+        return if (singleWordMatcher.matches()) userResponse.trim() else null
+    }
+
+
+    private fun goToSpeed(speedLevel: SpeedLevel) {
+        robotController.setGoToSpeed(speedLevel)
+    }
+
+    suspend fun skidJoy(x: Float, y: Float, repeat: Int) {
+        for (i in 1..repeat) {
+            robotController.skidJoy(x, y)
+            delay(500)
+        }
+    }
+
+    // Function to update an interrupt flag value
+    fun updateInterruptFlag(flag: String, value: Boolean) {
+        if (interruptFlags.containsKey(flag)) {
+            interruptFlags[flag] = value
+        } else {
+            println("Flag $flag does not exist in the interruptFlags map.")
+        }
+    }
+
+    private suspend fun speak(
+        speak: String?,
+        setConditionGate: Boolean = true,
+        haveFace: Boolean = true,
+        setInterruptSystem: Boolean = false,
+        setInterruptConditionUserMissing: Boolean = false,
+        setInterruptConditionUSerToClose: Boolean = false,
+        setInterruptConditionDeviceMoved: Boolean = false
+    ) {
+        if (speak != null) {
+            // Split the input text into sentences based on common sentence-ending punctuation
+            val sentences = speak.split(Regex("(?<=[.!?])\\s+"))
+
+            // change the flags as needed
+            updateInterruptFlag("userMissing", setInterruptConditionUserMissing)
+            updateInterruptFlag("userTooClose", setInterruptConditionUSerToClose)
+            updateInterruptFlag("deviceMoved", setInterruptConditionDeviceMoved)
+
+            for (sentence in sentences) {
+                if (sentence.isNotBlank()) {
+                    do {
+                       // Log.i("DEBUG!", sentence)
+                        // set the repeat flag to false once used
+                        if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag = false
+
+                        // Speak each sentence individually
+                        // Log.i("DEBUG!", "repeatSpeechFlag: $repeatSpeechFlag")
+                        robotController.speak(
+                            sentence.trim(),
+                            buffer,
+                            haveFace
+                        )
+
+                        // Wait for each sentence to complete before moving to the next
+                        if (setConditionGate) {
+                            conditionGate ({
+                                ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
+                            })
+                        }
+                    } while (repeatSpeechFlag)
+                }
+            }
+        }
+
+        updateInterruptFlag("userMissing", false)
+        updateInterruptFlag("userTooClose", false)
+        updateInterruptFlag("deviceMoved", false)
+    }
+
+    init {
+        
+        viewModelScope.launch {
+            launch {
+                while(true) {
+                    // Log.i("DEBUG!", "In misuse state: ${isMisuseState()}")
+                    // Log.i("DEBUG!", "Flag: ${interruptFlags["deviceMoved"]}")
+                    if ((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true) {
+                        conditionTimer({!((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true)}, interruptTriggerDelay)
+                        triggeredInterrupt = true
+                        repeatSpeechFlag = true
+                    } else {
+                        triggeredInterrupt = false
                     }
                     buffer()
                 }
             }
 
+            while (true) {
+                while (triggeredInterrupt) {
+                    // conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                    when {
+                        interruptFlags["deviceMoved"] == true && isMisuseState()-> robotController.speak("Hey, do not touch me.", buffer)
+                        interruptFlags["userMissing"] == true && yPosition == YDirection.MISSING -> robotController.speak("Hey, I am not done with my speech.", buffer)
+                        interruptFlags["userTooClose"] == true && yPosition == YDirection.CLOSE -> robotController.speak("Hey, you are too close.", buffer)
+                        else -> {}
+                    }
+                    conditionTimer({!triggeredInterrupt}, 5)
+                }
+                buffer()
+            }
+        }
+        
+        // script for Temi for the Tour
+        viewModelScope.launch {
+            idleSystem(false)
+            initiateTour()
+
+            launch { // Use this to handle the stateflow changes for tour
+                while (true) { // This will loop the states
+                    Log.i("DEBUG!", "In start location")
+                    tourState(TourState.TESTING)
+
+//                    tourState(TourState.START_LOCATION)
+//                    tourState(TourState.ALTERNATE_START)
+//                    tourState(TourState.STAGE_1_B)
+//                    tourState(TourState.STAGE_1_1_B)
+//                    tourState(TourState.GET_USER_NAME)
+//                    tourState(TourState.STAGE_1_2_B)
+//                    tourState(TourState.TOUR_END)
+
+//                    tourState(TourState.IDLE)
+//                    tourState(TourState.STAGE_1)
+//                    tourState(TourState.STAGE_1_1)
+//                    tourState(TourState.GET_USER_NAME)
+//                    tourState(TourState.TOUR_END)
+                }
+            }
 
             // This should never be broken out of if the tour is meant to be always running.
             while (true) {
                 when (tourState) {
+                    TourState.START_LOCATION -> {
+                        playMusic = false
+                        goTo("home base")
+                       // Log.i("DEBUG!", "Trying")
+                        stateFinished()
+                    }
+
                     TourState.IDLE -> {
-                        stateMode = State.CONSTRAINT_FOLLOW
-                        while (true) { // System to get reply from user
-                            if (xPosition != XDirection.GONE) { // Check if there is a user present
+                        stateMode(State.CONSTRAINT_FOLLOW)
 
-                                robotController.speak(
-                                    "Hi there, would you like to take a tour? Please just say yes or no.",
-                                    buffer
-                                )
-                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-
-                                while (true) {
-                                    robotController.wakeUp() // This will start the listen mode
-                                    conditionGate({ isAttached }) // Wait until listen mode completed
-                                    // Log.i("START!", "isAttached: $isAttached")
-
-                                    // Make sure the speech value is updated before using it
-                                    userResponse =
-                                        speechUpdatedValue // Store the text from listen mode to be used
-                                    speechUpdatedValue =
-                                        null // clear the text to null so show that it has been used
-                                    // Log.i("START!", "userResponse: $userResponse")
-
-                                    when { // Condition gate based on what the user says
-                                        containsPhraseInOrder(userResponse, reject, true) -> {
-                                            robotController.speak(
-                                                "Ok, if you change your mind feel free to come back and ask.",
-                                                buffer
-                                            )
-                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            delay(5000L)
-                                            break
-                                        }
-
-                                        containsPhraseInOrder(userResponse, confirmation, true) -> {
-                                            robotController.speak("Yay, I am so excited", buffer)
-                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            shouldExit = true
-                                            break
-                                        }
-
-                                        else -> {
-                                            if (yPosition != YDirection.MISSING) {
-                                                robotController.speak(
-                                                    "Sorry, I did not understand what you said. Could you repeat yourself.",
-                                                    buffer
-                                                )
-                                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            } else {
-                                                while (ttsStatus.value.status != TtsRequest.Status.STARTED) {
-                                                    robotController.speak(
-                                                        "You do not have to ignore me. I have feelings too you know.",
-                                                        buffer
-                                                    )
-                                                    buffer()
-                                                }
-                                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                                break
-                                            }
-                                        }
-                                    }
-                                    buffer()
-                                }
-                                if (shouldExit) {
-                                    while (true) {
-                                        if (yPosition != YDirection.CLOSE) {
-                                            robotController.speak(
-                                                "I will now begin the tour. Please follow me!",
-                                                buffer
-                                            )
-                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            break
-                                        } else {
-                                            robotController.speak(
-                                                "Sorry, you are currently too close to me, may you please take a couple steps back?",
-                                                buffer
-                                            )
-                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            conditionTimer(
-                                                { yPosition != YDirection.CLOSE },
-                                                time = 50
-                                            )
-                                            if (yPosition != YDirection.CLOSE) {
-                                                robotController.speak(" Thank you", buffer)
-                                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            }
-                                        }
-                                    }
-                                    break
-                                }
-                            }
-                            buffer()
+                        getUseConfirmation(
+                            "Hi there, would you like to take a tour? Please just say yes or no.",
+                            "Ok, if you change your mind feel free to come back and ask.",
+                            5000L,
+                            "Yay, I am so excited",
+                            "Sorry, I did not understand what you said. Could you repeat yourself.",
+                            "You do not have to ignore me. I have feelings too you know."
+                        ) {
+                            exitCaseCheckIfUserClose(
+                                "I will now begin the tour. Please follow me!",
+                                "Sorry, you are currently too close to me, may you please take a couple steps back?"
+                            )
                         }
 
-                        stateMode = State.NULL
-                        tourState = TourState.STAGE_1
+                        stateFinished()
+                    }
+
+                    TourState.ALTERNATE_START -> {
+                        setMainButtonMode(true)
+                        conditionGate({ followState != BeWithMeState.TRACK })
+                        speak("I am now following you")
+
+                        val excitementPhrases = listOf(
+                            "I am so excited!",
+                            "I can’t wait to start this tour!",
+                            "This is going to be so much fun!",
+                            "I cannot wait to show them around!",
+                            "I can not wait to get this adventure started!",
+                            "I am so excited!"
+                        )
+
+                        // While loop to monitor the follow state and express excitement
+                        while (followState != BeWithMeState.ABORT) {
+                            // Select a random phrase from the list and speak it
+                            val phrase = excitementPhrases.random()
+                            speak(phrase)
+
+                            // Check the condition and wait before the next statement
+                            conditionTimer({ followState == BeWithMeState.ABORT }, 5)
+                        }
+
+                        speak("Thank you very much for the head pats")
+
+                        playMusic = true
+
+                        setMainButtonMode(false)
+                        goTo(
+                            "greet tour",
+                            "Hi every one, my name is Temi and I will be the one conducting this tour and showing you our engineering department. I am very excited to meet you all today. "
+                        )
+
+                        speak("Before we begin, I would like to let everyone know that I am able to recognise speech. However, I can only do this if this icon pops up.")
+                        robotController.wakeUp() // This will start the listen mode
+                        delay(3000)
+                        robotController.finishConversation()
+                        speak("When this happens, please respond and say something once. I am not very good yet at recognizing speech, so if you say something to quickly or too many times I will get confused. I will try my best though.")
+                        speak("Should we test this out now?")
+
+                        getUseConfirmation(
+                            "Is everyone ready for the tour? Please just say yes or no!",
+                            "Well to bad, we are doing it anyway",
+                            5000L,
+                            "Yay, I am so excited",
+                            "Sorry, I did not understand what you said. Could you repeat yourself.",
+                            "You do not have to ignore me. I have feelings too you know."
+                        ) {
+                            exitCaseCheckIfUserClose(
+                                "I will now begin the tour. Please follow me!",
+                                "Sorry, you are currently too close to me, may you please take a couple steps back?"
+                            )
+                        }
+
+                        stateFinished()
+                    }
+
+                    TourState.RAMP -> {
+
                     }
 
                     TourState.STAGE_1 -> {
-                        robotController.speak(
-                            "Our first stop is room R410. I would like to welcome you to NYP. In particular, our engineering department. In this tour I will show you a couple of the facilities that we have to help our students pursue their goals and dreams.",
-                            buffer
+                        goToSpeed(SpeedLevel.MEDIUM)
+
+                        goTo(
+                            "r410 front door",
+                            "Our first stop is room R410. I would like to welcome you to NYP. In particular, our engineering department. In this tour I will show you a couple of the facilities that we have to help our students pursue their goals and dreams."
                         )
 
-                        robotController.goTo("r410 front door")
-                        // while(true) {buffer()}
+                        goToSpeed(SpeedLevel.HIGH)
 
-                        conditionGate({ goToLocationState != LocationState.COMPLETE })
-                        // robotController.turnBy(-15, buffer = buffer)
-                        // conditionGate({ movementState != MovementStatus.COMPLETE && movementState != MovementStatus.ABORT})
+                        speak("I have made it to the r410 front door location")
 
-                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                        robotController.speak(
-                            "I have made it to the r410 front door location",
-                            buffer
-                        )
-                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-
-                        // Check if the user is in front
                         while (true) {
                             if (yPosition != YDirection.MISSING) {
                                 if (yPosition == YDirection.CLOSE) {
-                                    robotController.speak(
-                                        "Sorry, you are a bit too close for my liking, could you take a couple steps back?",
-                                        buffer
-                                    )
-                                    conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                    conditionTimer({ yPosition != YDirection.CLOSE }, time = 50)
+                                    speak("Sorry, you are a bit too close for my liking, could you take a couple steps back?")
+                                    conditionTimer({ yPosition != YDirection.CLOSE }, time = 5)
+
                                     if (yPosition != YDirection.CLOSE) {
-                                        robotController.speak(" Thank you", buffer)
-                                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                        speak("Thank you")
                                     }
+
                                 } else {
-                                    robotController.speak(
-                                        "Welcome to block R level 4. Before we begin I would like to explain a couple of my capabilities. If you are ready for me to continue please say Yes or No.",
-                                        buffer
-                                    )
-                                    conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                    speak("Welcome to block R level 4. Before we begin I would like to explain a couple of my capabilities.")
                                     break
                                 }
                             } else {
-                                robotController.speak(
-                                    "Please Stand in front of me and I will begin the tour.",
-                                    buffer
-                                )
-                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                conditionTimer({ yPosition != YDirection.MISSING }, time = 20)
+                                speak("Please Stand in front of me and I will begin the tour.")
+                                conditionTimer({ yPosition != YDirection.MISSING }, time = 2)
+
                                 if (yPosition == YDirection.MISSING) {
-                                    robotController.turnBy(179, buffer = buffer)
-                                    conditionGate({ movementState != MovementStatus.COMPLETE && movementState != MovementStatus.ABORT })
+                                    turnBy(180)
+                                    speak("Sorry, I need you to stand in front of me to begin the tour.")
+                                    turnBy(180)
 
-                                    robotController.speak(
-                                        "Sorry, I need you to stand in front of me to begin the tour.",
-                                        buffer
-                                    )
-                                    conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-
-                                    robotController.turnBy(179, buffer = buffer)
-                                    conditionGate({ movementState != MovementStatus.COMPLETE && movementState != MovementStatus.ABORT })
-                                    conditionTimer({ yPosition != YDirection.MISSING }, time = 50)
+                                    conditionTimer({ yPosition != YDirection.MISSING }, time = 5)
                                 }
                                 if (yPosition != YDirection.MISSING) {
-                                    robotController.speak(" Thank you", buffer)
-                                    conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                    speak("Thank You")
                                 }
                             }
                             buffer()
                         }
-                        tourState = TourState.STAGE_1_1
+
+                        getUseConfirmation(
+                            "If you are ready for me to continue please say Yes. Otherwise, say no and I will wait.",
+                            "Ok, I will wait a little bit.",
+                            5000L,
+                            "Great, I will now begin my demonstration",
+                            "Sorry, I did not understand what you said. Could you repeat yourself.",
+                            "Sorry, I must ask you to come back."
+                        )
+
+                        stateFinished()
+                    }
+
+                    TourState.STAGE_1_B -> {
+
+                        speak(" As I go up this ramp, please don’t assist me. I may struggle a bit because of the black lines on the ramp. I rely on infrared sensors to detect sudden drops on the ground to avoid falling, but black absorbs infrared light more than other colors. This means the intensity of infrared light I receive back is lower then it otherwise would be. This can make it seem to me like there’s a drop, which is why I have difficulty here. But don’t worry, I’m big and strong enough to handle it on my own!", setConditionGate = false)
+
+                        goTo("before ramp")
+                        skidJoy(1.0F, 0.0F, 8)
+
+                        goTo("middle ramp")
+                        skidJoy(1.0F, 0.0F, 8)
+
+                        goTo(
+                            "r410 back door",
+                                    "Now that we have that covered, our first stop is room R410. Welcome to NYP, specifically to our engineering department! On this tour, I’ll be showing you some of the facilities we have that support our students in pursuing their goals and dreams.\"",
+                            true
+                        )
+
+                        speak("I have made it to the r410 back door location")
+
+                        stateFinished()
                     }
 
                     TourState.STAGE_1_1 -> { //**************************************************************
                         // Check if everyone is ready
                         shouldExit = false
+
+                        /*
                         while (true) {
                             if (xPosition != XDirection.GONE) {
                                 if (containsPhraseInOrder(userResponse, reject, true)) {
@@ -437,9 +790,6 @@ class MainViewModel @Inject constructor(
                                     robotController.wakeUp()
                                     conditionGate({ isAttached })
 
-//                                    // Make sure the speech value is updated before using it
-//                                    while (!speechUpdatedFlag) { buffer() }
-                                    // Make sure the speech value is updated before using it
                                     userResponse =
                                         speechUpdatedValue // Store the text from listen mode to be used
                                     speechUpdatedValue =
@@ -480,8 +830,7 @@ class MainViewModel @Inject constructor(
                                 if (shouldExit) {
                                     break
                                 }
-                            }
-                            else {
+                            } else {
                                 robotController.speak(
                                     "Sorry, I need you to remain in front of me for this tour",
                                     buffer
@@ -490,75 +839,300 @@ class MainViewModel @Inject constructor(
                             }
                             buffer()
                         }
+                         */
 
-                        robotController.speak(
-                            "My first capability, one that you might have noted, is my ability to detect how close someone is in front of me. For this example, I want everyone to be far away from me",
-                            buffer
-                        )
-                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                        speak("My first capability, one that you might have noted, is my ability to detect how close someone is in front of me. For this example, I want everyone to be far away from me")
 
-                        // Get everyone to move far away from temi
+//                        // Get everyone to move far away from temi
                         while (true) {
                             if (yPosition == YDirection.FAR) {
-                                robotController.speak(
-                                    "Great, this distance is what I consider you to be far away from me. Can I have one person move a little bit closer?",
-                                    buffer
-                                )
-                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                speak("Great, this distance is what I consider you to be far away from me. Can I have one person move a little bit closer?")
                                 break
                             } else {
-                                robotController.speak(
-                                    "Sorry, Could you step back a bit more.",
-                                    buffer
+                                speak("Sorry, Could you step back a bit more.")
+                                conditionTimer(
+                                    { yPosition == YDirection.FAR || yPosition == YDirection.MISSING },
+                                    time = 4
                                 )
-                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                conditionTimer({ yPosition == YDirection.FAR }, time = 40)
 
-                                if (yPosition == YDirection.FAR) {
-                                    robotController.speak(" Thank you", buffer)
-                                    conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                if (yPosition == YDirection.FAR || yPosition == YDirection.MISSING) {
+                                    speak("Thank you")
                                 }
                             }
                             buffer()
                         }
 
                         // Get one person to move close to Temi
+                        // Step 2: Get one person to move close to Temi at midrange
                         while (true) {
-                            if (yPosition == YDirection.MIDRANGE) {
-                                robotController.speak(
-                                    "Perfect, this distance is my Midrange. For the duration of this I must ask you to say at least this distance away from me. If not, I will have difficulties trying to navigate around.",
-                                    buffer
-                                )
-                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                break
-                            } else { // If too close
-                                if (yPosition == YDirection.CLOSE) {
+                            when (yPosition) {
+                                YDirection.MIDRANGE -> {
+                                    speak("Perfect, this distance is my Midrange. Please stay at least this distance to allow me to navigate easily.")
+                                    break
+                                }
+
+                                YDirection.CLOSE -> {
+                                    speak("Sorry, could you step back a bit more.")
+                                    conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 4)
+                                }
+
+                                YDirection.FAR, YDirection.MISSING -> {
+                                    speak("Sorry, could you come a bit closer.")
+                                    conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 4)
+                                }
+                            }
+                            if (yPosition == YDirection.MIDRANGE) speak("Thank you")
+                            buffer()
+                        }
+
+                        stateFinished()
+                    }
+
+                    TourState.STAGE_1_1_B -> {
+                        // Check if everyone is ready
+                        shouldExit = false
+
+                        /*
+                        while (true) {
+                            if (xPosition != XDirection.GONE) {
+                                if (containsPhraseInOrder(userResponse, reject, true)) {
                                     robotController.speak(
-                                        "Sorry, Could you step back a bit more.",
+                                        "Ok, I have waited for a bit. Is everyone ready now?",
                                         buffer
                                     )
                                     conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                    conditionTimer({ yPosition == YDirection.CLOSE }, time = 40)
-                                } else { // if two far or missing
-                                    robotController.speak("Sorry, Could you come a bit closer.", buffer)
-                                    conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                    conditionTimer(
-                                        { yPosition == YDirection.FAR || yPosition == YDirection.MISSING },
-                                        time = 40
-                                    )
                                 }
 
-                                if (yPosition == YDirection.MIDRANGE) { // if they are the correct distance
-                                    robotController.speak("Thank you", buffer)
-                                    conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                while (true) {
+                                    robotController.wakeUp()
+                                    conditionGate({ isAttached })
+
+                                    userResponse =
+                                        speechUpdatedValue // Store the text from listen mode to be used
+                                    speechUpdatedValue =
+                                        null // clear the text to null so show that it has been used
+
+                                    when {
+                                        containsPhraseInOrder(userResponse, reject, true) -> {
+                                            robotController.speak(
+                                                "Ok, I will wait a little bit.",
+                                                buffer
+                                            )
+                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                            delay(5000L)
+                                            break
+                                        }
+
+                                        containsPhraseInOrder(userResponse, confirmation, true) -> {
+                                            robotController.speak("Great", buffer)
+                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                            shouldExit = true
+                                            break
+                                        }
+
+                                        else -> {
+                                            if (yPosition != YDirection.MISSING) {
+                                                robotController.speak(
+                                                    "Sorry, I did not understand what you said. Could you repeat yourself.",
+                                                    buffer
+                                                )
+                                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                            } else {
+                                                break
+                                            }
+                                        }
+                                    }
+                                    buffer()
+                                }
+                                if (shouldExit) {
+                                    break
+                                }
+                            } else {
+                                robotController.speak(
+                                    "Sorry, I need you to remain in front of me for this tour",
+                                    buffer
+                                )
+                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                            }
+                            buffer()
+                        }
+                         */
+
+                        speak("My first capability, one that you might have noted, is my ability to detect how close someone is in front of me. For this example, I want everyone to be far away from me")
+
+//                        // Get everyone to move far away from temi
+                        while (true) {
+                            if (yPosition == YDirection.FAR || yPosition == YDirection.MISSING) {
+                                speak("Great, this distance is what I consider you to be far away from me. Can I have one person move a little bit closer? Try and position yourself to be about a meter away from me.")
+                                break
+                            } else {
+                                speak("Sorry, Could you step back a bit more.")
+                                conditionTimer({ yPosition == YDirection.FAR }, time = 1)
+
+                                if (yPosition == YDirection.FAR) {
+                                    speak("Thank you")
                                 }
                             }
                             buffer()
                         }
 
-                        robotController.speak("Made it to the end!", buffer)
-                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                        tourState = TourState.TERMINATE
+                        // Get one person to move close to Temi
+                        // Step 2: Get one person to move close to Temi at midrange
+                        while (true) {
+                            when (yPosition) {
+                                YDirection.MIDRANGE -> {
+                                    speak("Perfect, this distance is my Midrange. Please stay at least this distance to allow me to navigate easily.")
+                                    break
+                                }
+
+                                YDirection.CLOSE -> {
+                                    speak("Sorry, could you step back a bit more.")
+                                    conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 1)
+                                }
+
+                                YDirection.FAR, YDirection.MISSING -> {
+                                    speak("Sorry, could you come a bit closer.")
+                                    conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 1)
+                                }
+                            }
+                            if (yPosition == YDirection.MIDRANGE) speak("Thank you")
+                            buffer()
+                        }
+
+                        stateFinished()
+                    }
+
+                    TourState.STAGE_1_2 -> TODO()
+
+                    TourState.STAGE_1_2_B -> {
+                        val locations = listOf(
+                            Pair("r417", true),
+                            Pair("r416", true),
+                            Pair("trophy cabinet 1", true),
+                            Pair("award exit", true),
+                            Pair("r405", true),
+                            Pair("r412", true),
+                            Pair("r407", true),
+                            Pair("r410 poster spot", true)
+                        )
+
+// Cycle through each location with its direction and custom script
+                        for ((location, backwards) in locations) {
+                            // Use a `when` expression to determine the script for each location
+                            var script = "hello"
+                            when (location) {
+                                "r417" -> {
+                                    delay(1000)
+                                    script =
+                                        "The lab in front of you is the Electrical Machines & Drives Lab. Electrical machines are found everywhere in our daily lives, either serving us directly or assisting us in performing various tasks. Here, you will learn the latest knowledge and skills related to machines and drives, and perform simulations using industry-standard software and technologies, such as those from FESTO. As a result, learners will gain a strong understanding of the different drives and machines suitable for various applications."
+                                    // goTo(location)
+                                    _shouldPlayGif.value = false
+                                    _imageResource.value = R.drawable.r417
+                                    // speak(script, haveFace = false)
+                                    goTo(location, script, haveFace = false, backwards = backwards)
+                                    buffer()
+                                    _shouldPlayGif.value = true
+                                }
+
+                                "r416" -> {
+                                    delay(1000)
+                                    script =
+                                        "In front of you is the Mechatronics Systems Integration Lab. In this lab, students will acquire the skills needed to program microcontrollers to control peripherals. A microcontroller is a small computer built into a metal-oxide-semiconductor integrated circuit. It is the heart of many automatically controlled products and devices, such as implantable medical devices, smart devices, sensors, and more. With the advancement of technology, microcontrollers have become an integral part of connecting our physical environment to the digital world, thereby improving our lives."
+                                    goTo(location, backwards = backwards)
+                                    _shouldPlayGif.value = false
+                                    _imageResource.value = R.drawable.r416
+                                    speak(script, haveFace = false)
+                                    buffer()
+                                    _shouldPlayGif.value = true
+                                }
+
+                                "trophy cabinet 1" -> {
+                                    delay(1000)
+                                    script =
+                                        "Our next stop is the NYP trophy cabinet. First and foremost on display are the many trophies we have won as champions in various robot categories at the annual Singapore Robotics Games. Different robots, such as legged robots and snakes, were designed, built, and developed in-house to participate in sprints, long-distance races, and even entertainment challenges."
+                                    goTo(location, speak = script, backwards = backwards)
+                                }
+
+                                "award exit" -> {
+                                    script =
+                                        "Our students have not only used their creativity in competitions but also in developing products to solve real-world problems and address industry needs. On display, you can see examples of products jointly developed by both students and staff during the students' final-year projects. Over a 3-month period, students are tasked with designing and implementing solutions. Some of these outputs are directly translated into industry projects, which have been in collaboration with SEG since NYP's founding in 1993."
+                                    _shouldPlayGif.value = false
+                                    _imageResource.value = R.drawable.trophy
+                                    goTo(location, speak = script, haveFace = false, backwards = backwards)
+                                    buffer()
+                                    _shouldPlayGif.value = true
+                                }
+
+                                "r405" -> {
+                                    script =
+                                        "In front of you is the Robotic Automation & Control Lab. In this lab, students will acquire skills to program robots for various applications, such as handling, picking, and palletizing. These robots are commonly found in factories to automate simple and repetitive tasks that would otherwise require dedicated resources. However, with advancements in technology, robots have expanded their presence from manufacturing industries to other sectors such as clinical laboratories, agriculture, food and beverage, and education, where they work collaboratively with humans. \n" +
+                                                "In addition to programming robots, machine vision plays an important role in robotic systems, enabling intelligent decision-making for complex tasks. Students will learn to perform identification and inspection using industrial-grade vision systems. \n" +
+                                                "With these skill sets, students can pursue careers as Robotics Engineers, Quality Control Engineers, or System Engineers, where robotic systems and vision technologies are deployed in various applications."
+                                    _shouldPlayGif.value = false
+                                    _imageResource.value = R.drawable.r405
+                                    goTo(location, speak = script, haveFace = false, backwards = backwards)
+                                    buffer()
+                                    _shouldPlayGif.value = true
+                                }
+
+                                "r412" -> {
+                                    script =
+                                        "In front of you is the Siemens Control Lab, where our learners gain knowledge in areas such as pneumatics, sensors, and Programmable Logic Controllers (also known as PLCs). Here, actions like 'pick and place' are practiced and applied hands-on using industry-standard equipment from Siemens. This provides our students with first-hand experience with the technologies and skills the industry is seeking."
+                                    goTo(location, backwards = backwards)
+                                    _shouldPlayGif.value = false
+                                    _imageResource.value = R.drawable.r412
+                                    speak(script, haveFace = false)
+                                    buffer()
+                                    _shouldPlayGif.value = true
+                                }
+
+                                "r410 poster spot" -> {
+                                    goTo(location, backwards = backwards)
+                                }
+
+                                else -> {}
+                            }
+                        }
+
+                        stateFinished()
+                    }
+
+                    TourState.TOUR_END -> {
+                        speak("Thank you for taking my tour, it was great being able to meet you all.")
+                        if (userName != null) {
+                            speak("Especially you $userName")
+                        }
+                        speak("I look forward to meeting you all next time.")
+
+                        goTo("r410 front door")
+
+                        val goodbyePhrases = listOf(
+                            "Thank you for joining me today!",
+                            "I hope you had a wonderful time!",
+                            "It was a pleasure showing you around!",
+                            "Safe travels and goodbye!",
+                            "I can't wait to see you again!",
+                            "Take care and have a fantastic day!"
+                        )
+
+                        // While loop to monitor the follow state and express excitement
+                        var repeat = 0
+
+                        while (repeat != 10) {
+                            repeat++
+                            // Select a random phrase from the list and speak it
+                            val phrase = goodbyePhrases.random()
+                            speak(phrase)
+
+                            // Check the condition and wait before the next statement
+                            conditionTimer({ followState == BeWithMeState.SEARCH }, 5)
+                        }
+
+                        goTo("home base")
+
+                        speak("I am ready for the next tour")
+
+                        stateFinished()
                     }
 
                     TourState.TERMINATE -> {
@@ -567,18 +1141,129 @@ class MainViewModel @Inject constructor(
                         }
                         // This is to add a stopping point in the code
                     }
+
+                    TourState.NULL -> {
+//                        val locations = listOf(
+//                            Pair("r410 back door", false),
+//                            Pair("r417", true),
+//                            Pair("r416", true),
+//                            Pair("r405", true),
+//                            Pair("r412", true),
+//                            Pair("r406", true),
+//                            Pair("r407", true),
+//                            Pair("r411", true)
+//                        )
+//
+//// Cycle through each location with its direction
+//                        for ((location, backwards) in locations) {
+//                            speak(location)
+//                            goTo(location, backwards = backwards)
+//                        }
+                    }
+
+                    TourState.TESTING -> {
+                        speak("My name is temi. How are you. Are you doing good. Wow, that sounds great.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionDeviceMoved = true, setInterruptConditionUSerToClose = true)
+                    }
+
+                    /*
+                    //                        speak("Ladies and gentlemen, esteemed apple enthusiasts, and fruit aficionados alike, today, I stand before you not just to express an opinion, but to deliver a testament, an homage, and, yes, a love letter to one of nature's finest and most versatile gifts to humankind – the apple.\n" +
+//                                "\n" +
+//                                "Where shall I begin? Perhaps with the very essence of an apple itself – its refreshing crunch, a sound that reverberates with the essence of nature, crisp and pure, as if capturing the vitality of orchards under autumn’s golden sunlight. That first bite of an apple is no mere sensation; it’s an experience, an awakening that brings with it the rich heritage of a fruit whose history stretches as far back as the ancient Silk Road. Apples have traveled alongside humanity, moving from wild groves in Kazakhstan to carefully tended orchards across continents. Today, they come to us not just as humble produce, but as ambassadors of culture, tradition, and taste.\n" +
+//                                "\n" +
+//                                "But let us not be hasty in our praise, for apples are not only about history and lineage. They offer sustenance, joy, and refreshment in ways few other fruits can. Imagine standing in an orchard on a crisp autumn day, breathing in the earthy fragrance of fallen leaves and ripened fruit, and then reaching out to pluck an apple straight from the tree. This moment, simple yet profound, is a ritual passed down through generations. And every bite is a celebration of nature’s bounty – of rain, soil, and sun, all working harmoniously to create something delightful.\n" +
+//                                "\n" +
+//                                "Now, there are those who may say, “What’s so special about apples? They’re just fruits.” But let us not reduce these wonders to mere mundanity. Consider the staggering variety of apples available: Gala, Fuji, Honeycrisp, Granny Smith, Braeburn, Pink Lady, and so many others, each offering a unique profile of flavor and texture. The Honeycrisp’s juiciness explodes with a perfect balance of sweetness and acidity, while the Granny Smith tantalizes with a tartness that’s bold, unapologetic, and invigorating. Even in their simplicity, apples find endless ways to delight. There’s no other fruit, I dare say, with such versatility. You want a snack? Grab an apple. Need a boost in fiber and vitamin C? Look no further. Craving a flavor that pairs perfectly with everything from cinnamon to cheese to walnuts? The apple delivers.\n" +
+//                                "\n" +
+//                                "But apples are more than just taste. They are symbols. An apple a day keeps the doctor away, as the saying goes, capturing not only their nutritional value but the trust we place in them for our well-being. Rich in dietary fiber and antioxidants, apples promote heart health, aid digestion, and support the immune system. When I eat an apple, I feel connected to the earth, to the very cycles of life, nourished by something as close to pure as one can find in this world.\n" +
+//                                "\n" +
+//                                "And how wonderful is the diversity of ways we enjoy them! Apples can be baked into pies, the epitome of comfort food. They can be transformed into cider, both soft and hard, offering us warmth and delight, whether shared with family or friends. In caramel-coated form, they become treats of sheer indulgence, while sliced in a salad, they add a crisp contrast that brightens any dish. Even their juice alone is a drink cherished by children and adults alike, the essence of the apple distilled into a form so simple yet so satisfying.\n" +
+//                                "\n" +
+//                                "An apple is not just a fruit; it’s a canvas. It’s adaptable, open to interpretation and reinvention, welcoming spices, sugars, and the company of other fruits with equal ease. From compotes and sauces to crisps and crumbles, apples are at home in an astonishing array of culinary creations. And let us not forget the simple beauty of a well-dried apple chip, that chewy, tangy reminder of autumn available even on the warmest summer day.\n" +
+//                                "\n" +
+//                                "My friends, we do not simply eat apples. No, we embrace them, savoring a bond between humankind and nature that stretches back thousands of years. So let us not take for granted the magic that comes from that first bite, the joy that an apple brings, and the countless ways it enriches our lives.\n" +
+//                                "\n" +
+//                                "To the apple – long may it endure as a symbol of health, vitality, and flavor! Thank you.")
+//                    }
+                     */
+
+                    TourState.GET_USER_NAME -> {
+                        // Stuff below gets userName
+                        speak("While you are there, do you mind if I ask for your name?")
+
+                        var attempts = 0
+                        userName = null
+                        while (true) {
+                            if (attempts > 5) break
+                            listen()
+                            if (userResponse != null) {
+                                if (containsPhraseInOrder(userResponse, reject, true)) {
+                                    break
+                                }
+
+                                userName = extractName(userResponse!!)
+                                if (userName != null) {
+                                    var gotName = false
+                                    speak("I think your name is $userName, is that correct?")
+
+                                    while (true) {
+                                        listen()
+
+                                        when { // Confirmation gate based on user input
+                                            containsPhraseInOrder(userResponse, reject, true) -> {
+                                                speak("Okay, let’s try again.")
+                                                break
+                                            }
+
+                                            containsPhraseInOrder(
+                                                userResponse,
+                                                confirmation,
+                                                true
+                                            ) -> {
+                                                speak("Great!")
+                                                gotName = true
+                                                break
+                                            }
+
+                                            else -> {
+                                                speak("Sorry, I did not hear you clearly. Could you confirm your name?")
+                                            }
+                                        }
+
+                                        buffer() // Buffer pause for user response
+                                    }
+
+                                    if (gotName) {
+                                        break  // Exit main loop after confirmation
+                                    }
+
+                                } else {
+                                    speak("Sorry, I didn’t catch your name. Try using a phrase like, 'my name is...'")
+                                }
+                            } else {
+                                speak("Sorry, I didn’t hear you. Could you repeat yourself?")
+                            }
+                            attempts++
+                            buffer()  // Slight pause before the next attempt
+                        }
+
+                        if (userName == null) {
+                            speak("It seems I couldn't get your name. Feel free to introduce yourself again later.")
+                        } else {
+                            speak("Hi there, $userName. My name is Temi. It's nice to meet you.")
+                        }
+
+                        stateFinished()
+                    }
+
+                    TourState.TEMI_V2 -> {
+
+                    }
                 }
                 buffer()
             }
-
-            job.cancel()
-            job1.cancel()
-            job2.cancel()
-//        robotController.askQuestion("How are you?")
-//            robotController.wakeUp()
-//            stateMode =State.TOUR
         }
-
+        // *********************************************************************************************** DO NOT WORRY ABOUT ANYTHING DOWN HERE!
+        //******************************************** Do not worry about the other launches.
         viewModelScope.launch {
             while (true) {
 //                Log.i("HOPE!", askResult.value.toString())
@@ -1241,10 +1926,8 @@ class MainViewModel @Inject constructor(
 
             val job = launch {
                 askResult.collect { status ->
-//                    robotController.finishConversation()
                     speechUpdatedValue = status.result
                     speech = status.result
-                    Log.i("START!", "$speech")
                 }
             }
 
@@ -1263,14 +1946,14 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    //**************************Functions for the ViewModel
-    suspend fun speech(text: String) {
-        robotController.speak(text, buffer)
-        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-        conditionTimer({ !(dragged.value.state || lifted.value.state) }, time = 2)
-    }
+    //**************************Functions for the ViewModel <- these are the ones that you should car about
+//    suspend fun speech(text: String) {
+//        robotController.speak(text, buffer)
+//        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+//        conditionTimer({ !(dragged.value.state || lifted.value.state) }, time = 2)
+//    }
 
-    //**************************Functions for the View
+    //**************************Functions for the View  <- Don't worry about this for the tour
     fun resultSpeech(
         int: Int = 0,
         say: String = "Hello, World"
@@ -1303,7 +1986,7 @@ class MainViewModel @Inject constructor(
     private suspend fun conditionTimer(trigger: () -> Boolean, time: Int) {
         if (!trigger()) {
             for (i in 1..time) {
-                buffer()
+                delay(1000)
 //            Log.i("Trigger", trigger().toString())
                 if (trigger()) {
                     break
