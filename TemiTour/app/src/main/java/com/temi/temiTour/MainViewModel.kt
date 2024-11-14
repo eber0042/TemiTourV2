@@ -507,6 +507,9 @@ class MainViewModel @Inject constructor(
                             // Log.i("DEBUG!", sentence)
                             // set the repeat flag to false once used
                             if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag = false
+                            else if (!setInterruptSystem) {
+                                repeatSpeechFlag = false
+                            }
 
                             // Speak each sentence individually
                             // Log.i("DEBUG!", "repeatSpeechFlag: $repeatSpeechFlag")
@@ -539,6 +542,9 @@ class MainViewModel @Inject constructor(
                                     // Log.i("DEBUG!", sentence)
                                     // set the repeat flag to false once used
                                     if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag = false
+                                    else if (!setInterruptSystem) {
+                                        repeatSpeechFlag = false
+                                    }
 
                                     // Speak each sentence individually
                                     // Log.i("DEBUG!", "repeatSpeechFlag: $repeatSpeechFlag")
@@ -628,10 +634,10 @@ class MainViewModel @Inject constructor(
             }
         }
 
-         Log.i("DEBUG!", "THREE: $talkingInThreadFlag")
+        // Log.i("DEBUG!", "THREE: $talkingInThreadFlag")
         if (speak != null) conditionGate({talkingInThreadFlag}, false)// conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)})
 
-         Log.i("DEBUG!", "$location: " + triggeredInterrupt)
+        // Log.i("DEBUG!", "$location: " + triggeredInterrupt)
         updateInterruptFlag("userMissing", false)
         updateInterruptFlag("userTooClose", false)
         updateInterruptFlag("deviceMoved", false)
@@ -1269,14 +1275,14 @@ class MainViewModel @Inject constructor(
                     }
 
                     TourState.TESTING -> {
-//                        speak("My name is temi. How are you. Are you doing good. Wow, that sounds great.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionDeviceMoved = true, setInterruptConditionUSerToClose = true)
-                        goToSpeed(SpeedLevel.SLOW)
-//                        goTo("test point 1")
-//                        goTo("test point 2")
-//                         speak(speak = "What do you do with a drunken sailor. Put him in the bed with the captains daughter. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
-                        goTo("test point 1", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor." , backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-                        // speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-                        goTo("test point 2", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+////                        speak("My name is temi. How are you. Are you doing good. Wow, that sounds great.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionDeviceMoved = true, setInterruptConditionUSerToClose = true)
+//                        goToSpeed(SpeedLevel.SLOW)
+////                        goTo("test point 1")
+////                        goTo("test point 2")
+////                         speak(speak = "What do you do with a drunken sailor. Put him in the bed with the captains daughter. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
+//                        goTo("test point 1", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor." , backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+//                        // speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+//                        goTo("test point 2", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
                     }
 
                     TourState.GET_USER_NAME -> {
