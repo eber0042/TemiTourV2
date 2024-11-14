@@ -373,6 +373,10 @@ class RobotController():
     fun stopMovement() {
         robot.stopMovement()
     }
+
+    fun tileAngle(degree: Int) {
+        robot.tiltAngle(degree)
+    }
     //********************************* Override is below
     /**
      * Called when connection with robot was established.

@@ -478,6 +478,10 @@ class MainViewModel @Inject constructor(
         robotController.stopMovement()
     }
 
+    private fun tiltAngle(degree: Int) {
+        robotController.tileAngle(degree)
+    }
+
     private suspend fun speak(
         speak: String?,
         setConditionGate: Boolean = true,
@@ -585,25 +589,45 @@ class MainViewModel @Inject constructor(
 //        updateInterruptFlag("userMissing", setInterruptConditionUserMissing)
 //        updateInterruptFlag("userTooClose", setInterruptConditionUSerToClose)
 //        updateInterruptFlag("deviceMoved", setInterruptConditionDeviceMoved)
+        if (setInterruptSystem) {
+            while (true) { // loop until to makes it to the start location
+                Log.i("DEBUG!", "Has Gone To Location: $hasGoneToLocation")
 
-        while (true) { // loop until to makes it to the start location
-             Log.i("DEBUG!", "Has Gone To Location: $hasGoneToLocation")
+                if (!triggeredInterrupt && !hasGoneToLocation) { robotController.goTo(location, backwards); Log.i("DEBUG!", "Hello: $repeatGoToFlag ")}
 
-            if (!triggeredInterrupt && !hasGoneToLocation) { robotController.goTo(location, backwards); Log.i("DEBUG!", "Hello: $repeatGoToFlag ")}
+                buffer()
+                Log.i("DEBUG!", "Triggered?: ")
+                conditionGate({ goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved) })
 
-            buffer()
-              Log.i("DEBUG!", "Triggered?: ")
-            conditionGate({ goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved) })
+                Log.i("DEBUG!", "Should exit " + (hasGoneToLocation && !repeatGoToFlag).toString())
 
-             Log.i("DEBUG!", "Should exit " + (hasGoneToLocation && !repeatGoToFlag).toString())
+                if (hasGoneToLocation && !repeatGoToFlag) break
+                else if (goToLocationState == LocationState.COMPLETE) hasGoneToLocation = true
 
-            if (hasGoneToLocation && !repeatGoToFlag) break
-            else if (goToLocationState == LocationState.COMPLETE) hasGoneToLocation = true
+                if (repeatGoToFlag) repeatGoToFlag = false
+                buffer()
 
-            if (repeatGoToFlag) repeatGoToFlag = false
-            buffer()
+            }
+        } else {
+            while (true) { // loop until to makes it to the start location
+                Log.i("DEBUG!", "Has Gone To Location none: $hasGoneToLocation")
 
+                if (!hasGoneToLocation) { robotController.goTo(location, backwards); Log.i("DEBUG!", "Hello none: $repeatGoToFlag ")}
+
+                buffer()
+                Log.i("DEBUG!", "Triggered? none: ")
+                conditionGate({ goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT}, true)
+
+                Log.i("DEBUG!", "Should exit none" + (hasGoneToLocation && !repeatGoToFlag).toString())
+
+                if (hasGoneToLocation) break
+                else if (goToLocationState == LocationState.COMPLETE) hasGoneToLocation = true
+
+                buffer()
+
+            }
         }
+
          Log.i("DEBUG!", "THREE: $talkingInThreadFlag")
         if (speak != null) conditionGate({talkingInThreadFlag}, false)// conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)})
 
@@ -630,7 +654,7 @@ class MainViewModel @Inject constructor(
                         // Log.i("DEBUG!", "Trigger Stopped")
                         stopMovement()
                     } else {
-                       // Log.i("DEBUG!", "Trigger Stopped")
+//                        Log.i("DEBUG!", "Trigger Stopped")
                         triggeredInterrupt = false
                     }
                     buffer()
@@ -661,15 +685,15 @@ class MainViewModel @Inject constructor(
             launch { // Use this to handle the stateflow changes for tour
                 while (true) { // This will loop the states
                     Log.i("DEBUG!", "In start location")
-//                    tourState(TourState.TESTING)
+                    tourState(TourState.TESTING)
 
-                    tourState(TourState.START_LOCATION)
-                    tourState(TourState.ALTERNATE_START)
-                    tourState(TourState.STAGE_1_B)
-                    tourState(TourState.STAGE_1_1_B)
-                    tourState(TourState.GET_USER_NAME)
-                    tourState(TourState.STAGE_1_2_B)
-                    tourState(TourState.TOUR_END)
+//                    tourState(TourState.START_LOCATION)
+//                    tourState(TourState.ALTERNATE_START)
+//                    tourState(TourState.STAGE_1_B)
+//                    tourState(TourState.STAGE_1_1_B)
+//                    tourState(TourState.GET_USER_NAME)
+//                    tourState(TourState.STAGE_1_2_B)
+//                    tourState(TourState.TOUR_END)
 
 //                    tourState(TourState.IDLE)
 //                    tourState(TourState.STAGE_1)
@@ -1247,10 +1271,12 @@ class MainViewModel @Inject constructor(
                     TourState.TESTING -> {
 //                        speak("My name is temi. How are you. Are you doing good. Wow, that sounds great.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionDeviceMoved = true, setInterruptConditionUSerToClose = true)
                         goToSpeed(SpeedLevel.SLOW)
-                        //speak(speak = "What do you do with a drunken sailor. Put him in the bed with the captains daughter. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
-                        goTo("test point 1", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor. Way hay and up she rises. What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor. Way hay and up she rises", backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+//                        goTo("test point 1")
+//                        goTo("test point 2")
+//                         speak(speak = "What do you do with a drunken sailor. Put him in the bed with the captains daughter. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
+                        goTo("test point 1", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor." , backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
                         // speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-                        goTo("test point 2", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor. Way hay and up she rises. What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                        goTo("test point 2", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
                     }
 
                     TourState.GET_USER_NAME -> {
