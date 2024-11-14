@@ -88,6 +88,7 @@ fun MainPage(context: Context) {
     // Track changes in the imageResource and shouldPlayGif state
     val shouldPlayGif by viewModel.shouldPlayGif.collectAsState()  // Assuming you're using StateFlow or LiveData for shouldPlayGif
     val imageResource by viewModel.image.collectAsState()  // Assuming you're using StateFlow or LiveData for imageResource
+    val gifResource by viewModel.gif.collectAsState()  // Assuming you're using StateFlow or LiveData for imageResource
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -112,7 +113,7 @@ fun MainPage(context: Context) {
         .build()
 
     // Conditionally set the image resource based on shouldPlayGif
-    val image = if (shouldPlayGif) R.drawable.idle else imageResource
+    val image = if (shouldPlayGif) gifResource else imageResource
 
     // AsyncImage component to display the image or GIF
     AsyncImage(

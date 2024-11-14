@@ -129,6 +129,10 @@ class MainViewModel @Inject constructor(
     private val _imageResource = MutableStateFlow(R.drawable.oip)
     val image: StateFlow<Int> = _imageResource
 
+    // StateFlow for holding the current image resource
+    private val _gifResource = MutableStateFlow(R.drawable.idle)
+    val gif: StateFlow<Int> = _gifResource
+
     // Function to update the image resource
     fun updateImageResource(resourceId: Int) {
         _imageResource.value = resourceId
@@ -583,27 +587,27 @@ class MainViewModel @Inject constructor(
 //        updateInterruptFlag("deviceMoved", setInterruptConditionDeviceMoved)
 
         while (true) { // loop until to makes it to the start location
-            Log.i("DEBUG!", "ONE")
+             Log.i("DEBUG!", "Has Gone To Location: $hasGoneToLocation")
 
             if (!triggeredInterrupt && !hasGoneToLocation) { robotController.goTo(location, backwards); Log.i("DEBUG!", "Hello: $repeatGoToFlag ")}
 
             buffer()
-             Log.i("DEBUG!", "one " + triggeredInterrupt)
+              Log.i("DEBUG!", "Triggered?: ")
             conditionGate({ goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved) })
 
-             Log.i("DEBUG!", "two " + triggeredInterrupt)
+             Log.i("DEBUG!", "Should exit " + (hasGoneToLocation && !repeatGoToFlag).toString())
 
             if (hasGoneToLocation && !repeatGoToFlag) break
             else if (goToLocationState == LocationState.COMPLETE) hasGoneToLocation = true
 
-            if (repeatGoToFlag) repeatGoToFlag = !repeatSpeechFlag
+            if (repeatGoToFlag) repeatGoToFlag = false
             buffer()
 
         }
-        Log.i("DEBUG!", "THREE: $talkingInThreadFlag")
-        if (speak != null) conditionGate({talkingInThreadFlag}, true)// conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)})
+         Log.i("DEBUG!", "THREE: $talkingInThreadFlag")
+        if (speak != null) conditionGate({talkingInThreadFlag}, false)// conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)})
 
-        Log.i("DEBUG!", "$location: " + triggeredInterrupt)
+         Log.i("DEBUG!", "$location: " + triggeredInterrupt)
         updateInterruptFlag("userMissing", false)
         updateInterruptFlag("userTooClose", false)
         updateInterruptFlag("deviceMoved", false)
@@ -619,7 +623,7 @@ class MainViewModel @Inject constructor(
 //                     Log.i("DEBUG!", "Flag: $yPosition")
                     if ((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] == true)) {
                         conditionTimer({!((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true)}, interruptTriggerDelay)
-                        if (yPosition != YDirection.MISSING) continue
+                        if ((yPosition != YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition != YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] != true)) continue
                         triggeredInterrupt = true
                         repeatSpeechFlag = true
                         repeatGoToFlag = true
@@ -657,15 +661,15 @@ class MainViewModel @Inject constructor(
             launch { // Use this to handle the stateflow changes for tour
                 while (true) { // This will loop the states
                     Log.i("DEBUG!", "In start location")
-                    tourState(TourState.TESTING)
+//                    tourState(TourState.TESTING)
 
-//                    tourState(TourState.START_LOCATION)
-//                    tourState(TourState.ALTERNATE_START)
-//                    tourState(TourState.STAGE_1_B)
-//                    tourState(TourState.STAGE_1_1_B)
-//                    tourState(TourState.GET_USER_NAME)
-//                    tourState(TourState.STAGE_1_2_B)
-//                    tourState(TourState.TOUR_END)
+                    tourState(TourState.START_LOCATION)
+                    tourState(TourState.ALTERNATE_START)
+                    tourState(TourState.STAGE_1_B)
+                    tourState(TourState.STAGE_1_1_B)
+                    tourState(TourState.GET_USER_NAME)
+                    tourState(TourState.STAGE_1_2_B)
+                    tourState(TourState.TOUR_END)
 
 //                    tourState(TourState.IDLE)
 //                    tourState(TourState.STAGE_1)
@@ -739,12 +743,16 @@ class MainViewModel @Inject constructor(
                             "Hi every one, my name is Temi and I will be the one conducting this tour and showing you our engineering department. I am very excited to meet you all today. "
                         )
 
-                        speak("Before we begin, I would like to let everyone know that I am able to recognise speech. However, I can only do this if this icon pops up.")
+                        _gifResource.value  = R.drawable.how_talk
+
+                        speak("Before we begin, I would like to let everyone know that I am able to recognise speech. However, I can only do this if this icon pops up.", haveFace = false)
                         robotController.wakeUp() // This will start the listen mode
                         delay(3000)
                         robotController.finishConversation()
-                        speak("When this happens, please respond and say something once. I am not very good yet at recognizing speech, so if you say something to quickly or too many times I will get confused. I will try my best though.")
-                        speak("Should we test this out now?")
+                        speak("When this happens, please respond and say something once. I am not very good yet at recognizing speech, so if you say something to quickly or too many times I will get confused. I will try my best though.", haveFace = false)
+                        speak("Should we test this out now?", haveFace = false)
+
+                        _gifResource.value  = R.drawable.idle
 
                         getUseConfirmation(
                             "Is everyone ready for the tour? Please just say yes or no!",
@@ -759,6 +767,8 @@ class MainViewModel @Inject constructor(
                                 "Sorry, you are currently too close to me, may you please take a couple steps back?"
                             )
                         }
+
+
 
                         stateFinished()
                     }
