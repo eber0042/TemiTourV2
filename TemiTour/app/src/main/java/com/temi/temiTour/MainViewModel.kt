@@ -1,6 +1,9 @@
 package com.temi.temiTour
 
 import android.util.Log
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.robotemi.sdk.TtsRequest
@@ -8,6 +11,7 @@ import com.robotemi.sdk.constants.HardButton
 import com.robotemi.sdk.navigation.model.Position
 import com.robotemi.sdk.navigation.model.SpeedLevel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +19,11 @@ import kotlinx.coroutines.launch
 import java.util.regex.Pattern
 import javax.inject.Inject
 import kotlin.math.*
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 
 // Track state
 enum class State {
@@ -453,7 +462,6 @@ class MainViewModel @Inject constructor(
         return if (singleWordMatcher.matches()) userResponse.trim() else null
     }
 
-
     private fun goToSpeed(speedLevel: SpeedLevel) {
         robotController.setGoToSpeed(speedLevel)
     }
@@ -643,8 +651,60 @@ class MainViewModel @Inject constructor(
         updateInterruptFlag("deviceMoved", false)
     }
 
+    //**********************************************CHAT GPT STUFF
+    private val _chatResponse = MutableLiveData<String>()
+    val chatResponse: LiveData<String> get() = _chatResponse
+
+    fun sendTestMessage(message: String) {
+        Log.i("DEBUG!", "Trying to send message")
+
+        val chatRequest = ChatRequest(
+            model = "gpt-3.5-turbo",  // Can be replaced with any model you want
+            messages = listOf(Message(role = "user", content = message))
+        )
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val call = RetrofitClient.getClient().getChatResponse(chatRequest)
+            call.enqueue(object : Callback<ChatResponse> {
+                override fun onResponse(call: Call<ChatResponse>, response: Response<ChatResponse>) {
+                    // Log the entire response body
+                    Log.i("DEBUG!", "Response: ${response.body()}")
+                    // Log the HTTP status code for debugging
+                    Log.i("DEBUG!", "HTTP Status Code: ${response.code()}")
+
+                    if (response.isSuccessful) {
+                        val reply = response.body()?.choices?.firstOrNull()?.message?.content
+                        _chatResponse.postValue(reply ?: "No response")
+                    } else {
+                        // Log failure code and message
+                        Log.e("DEBUG!", "Failed: HTTP ${response.code()} - ${response.message()}")
+                        _chatResponse.postValue("Failed: HTTP ${response.code()}")
+                    }
+                }
+
+                override fun onFailure(call: Call<ChatResponse>, t: Throwable) {
+                    // Handle failure: network issues, etc.
+                    Log.e("DEBUG!", "Error: ${t.message}")
+                    _chatResponse.postValue("Error: ${t.message}")
+                }
+            })
+        }
+    }
+    //**********************************************CHAT GPT STUFF
+
     init {
 
+        //*************************CHATGPT STUFF
+        // Observe the chat response and log it
+        chatResponse.observe(this, Observer { response ->
+            Log.i("DEBUG!", response ?: "No response received")
+        })
+
+        Log.i("DEBUG!", "Next step is sending the message")
+        // Send a test message
+        sendTestMessage("Hello, ChatGPT!")
+        //*************************CHATGPT STUFF
+        
         // thread used for handling interrupt system
         viewModelScope.launch {
             launch {
@@ -690,8 +750,8 @@ class MainViewModel @Inject constructor(
 
             launch { // Use this to handle the stateflow changes for tour
                 while (true) { // This will loop the states
-                    Log.i("DEBUG!", "In start location")
-                    tourState(TourState.TESTING)
+//                    Log.i("DEBUG!", "In start location")
+//                    tourState(TourState.TESTING)
 
 //                    tourState(TourState.START_LOCATION)
 //                    tourState(TourState.ALTERNATE_START)
@@ -2110,6 +2170,10 @@ class MainViewModel @Inject constructor(
         if (difference < -180) difference += 360
         return difference
     }
+}
+
+private fun <T> LiveData<T>.observe(mainViewModel: MainViewModel, observer: Observer<T>) {
+
 }
 
 class PositionChecker(

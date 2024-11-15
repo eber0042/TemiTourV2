@@ -23,16 +23,22 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
+import android.util.Log
+import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.Observer
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         enableEdgeToEdge()
         setContent {
             Surface(
             ) {
-                MainPage(this)
+                MainPage(this, this)
             }
         }
     }
@@ -79,7 +85,7 @@ class AudioPlayer(context: Context, private val mediaResId: Int) {
 }
 
 @Composable
-fun MainPage(context: Context) {
+fun MainPage(context: Context, lifecycleOwner: LifecycleOwner) {
     val viewModel: MainViewModel = hiltViewModel()
     val context = LocalContext.current
     val themeMusic = AudioPlayer(context, R.raw.greeting1)
