@@ -20,10 +20,14 @@ import java.util.regex.Pattern
 import javax.inject.Inject
 import kotlin.math.*
 import androidx.lifecycle.viewModelScope
+import com.aallam.openai.api.chat.ChatRole
+import com.aallam.openai.api.chat.chatCompletionRequest
+import com.aallam.openai.api.chat.chatMessage
+import com.aallam.openai.api.model.Model
+import com.aallam.openai.api.model.ModelId
+import com.aallam.openai.client.OpenAI
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
 
 // Track state
 enum class State {
@@ -129,6 +133,7 @@ class MainViewModel @Inject constructor(
     private var yMotion = YMovement.NOWHERE
 
     public var playMusic = false
+    public var playWaitMusic = false
 
     // StateFlow for controlling whether to play a GIF or static image
     private val _shouldPlayGif = MutableStateFlow(true)
@@ -145,6 +150,10 @@ class MainViewModel @Inject constructor(
     // Function to update the image resource
     fun updateImageResource(resourceId: Int) {
         _imageResource.value = resourceId
+    }
+
+    fun updateGifResource(resourceId: Int) {
+        _gifResource.value = resourceId
     }
 
     // Function to toggle the GIF state
@@ -217,7 +226,7 @@ class MainViewModel @Inject constructor(
     private var userName: String? = null
 
     private var followState = BeWithMeState.CALCULATING
-    
+
     private var triggeredInterrupt: Boolean = false
     // Define a mutable map to hold interrupt flags
     private val interruptFlags = mutableMapOf(
@@ -528,9 +537,9 @@ class MainViewModel @Inject constructor(
                             )
 
                             // Wait for each sentence to complete before moving to the next
-                                conditionGate ({
-                                    ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
-                                })
+                            conditionGate ({
+                                ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
+                            })
                         } while (repeatSpeechFlag)
                     }
                 }
@@ -651,60 +660,56 @@ class MainViewModel @Inject constructor(
         updateInterruptFlag("deviceMoved", false)
     }
 
-    //**********************************************CHAT GPT STUFF
-    private val _chatResponse = MutableLiveData<String>()
-    val chatResponse: LiveData<String> get() = _chatResponse
+    private val apiKey = "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"
 
-    fun sendTestMessage(message: String) {
-        Log.i("DEBUG!", "Trying to send message")
+    private val openAI = OpenAI(apiKey)
 
-        val chatRequest = ChatRequest(
-            model = "gpt-3.5-turbo",  // Can be replaced with any model you want
-            messages = listOf(Message(role = "user", content = message))
-        )
+    // Store response from GPT here, when used make null
+    private var responseGPT: String? = null
 
-        viewModelScope.launch(Dispatchers.IO) {
-            val call = RetrofitClient.getClient().getChatResponse(chatRequest)
-            call.enqueue(object : Callback<ChatResponse> {
-                override fun onResponse(call: Call<ChatResponse>, response: Response<ChatResponse>) {
-                    // Log the entire response body
-                    Log.i("DEBUG!", "Response: ${response.body()}")
-                    // Log the HTTP status code for debugging
-                    Log.i("DEBUG!", "HTTP Status Code: ${response.code()}")
+    // Use this to tell system if waiting, Null is default or Error
+    private var errorFlagGPT: Boolean = false
 
-                    if (response.isSuccessful) {
-                        val reply = response.body()?.choices?.firstOrNull()?.message?.content
-                        _chatResponse.postValue(reply ?: "No response")
-                    } else {
-                        // Log failure code and message
-                        Log.e("DEBUG!", "Failed: HTTP ${response.code()} - ${response.message()}")
-                        _chatResponse.postValue("Failed: HTTP ${response.code()}")
+    private fun sendMessage(openAI: OpenAI, userResponse: String) {
+        viewModelScope.launch(Dispatchers.Main) {
+            try {
+                // Define the model you want to use (GPT-3.5 or GPT-4)
+                val modelId = ModelId("gpt-4o-mini")
+
+                // Prepare the initial user message
+                val chatMessages = mutableListOf(
+                    chatMessage {
+                        role = ChatRole.System
+                        content = "You are an assistant embedded in a robot. Respond as sassy and snarky as possible to user queries. Ensure to keep responses very short so that it is not above 100 words."
+                    },
+                    chatMessage {
+                        role = ChatRole.User
+                        content = userResponse
                     }
+                )
+
+                // Create the chat completion request
+                val request = chatCompletionRequest {
+                    model = modelId
+                    messages = chatMessages
                 }
 
-                override fun onFailure(call: Call<ChatResponse>, t: Throwable) {
-                    // Handle failure: network issues, etc.
-                    Log.e("DEBUG!", "Error: ${t.message}")
-                    _chatResponse.postValue("Error: ${t.message}")
-                }
-            })
+                // Send the request and receive the response
+                val response = openAI.chatCompletion(request)
+
+                // Extract and log the model's response
+                val modelResponse = response.choices.first().message.content.orEmpty()
+                Log.d("DEBUG!", modelResponse)
+                responseGPT = modelResponse
+            } catch (e: Exception) {
+                Log.e("DEBUG!", "Error sending message: ${e.message}")
+                errorFlagGPT = true
+            }
         }
     }
-    //**********************************************CHAT GPT STUFF
 
     init {
 
-        //*************************CHATGPT STUFF
-        // Observe the chat response and log it
-        chatResponse.observe(this, Observer { response ->
-            Log.i("DEBUG!", response ?: "No response received")
-        })
-
-        Log.i("DEBUG!", "Next step is sending the message")
-        // Send a test message
-        sendTestMessage("Hello, ChatGPT!")
-        //*************************CHATGPT STUFF
-        
         // thread used for handling interrupt system
         viewModelScope.launch {
             launch {
@@ -742,7 +747,7 @@ class MainViewModel @Inject constructor(
                 buffer()
             }
         }
-        
+
         // script for Temi for the Tour
         viewModelScope.launch {
             idleSystem(false)
@@ -751,7 +756,8 @@ class MainViewModel @Inject constructor(
             launch { // Use this to handle the stateflow changes for tour
                 while (true) { // This will loop the states
 //                    Log.i("DEBUG!", "In start location")
-//                    tourState(TourState.TESTING)
+
+                    tourState(TourState.TESTING)
 
 //                    tourState(TourState.START_LOCATION)
 //                    tourState(TourState.ALTERNATE_START)
@@ -775,7 +781,7 @@ class MainViewModel @Inject constructor(
                     TourState.START_LOCATION -> {
                         playMusic = false
                         goTo("home base")
-                       // Log.i("DEBUG!", "Trying")
+                        // Log.i("DEBUG!", "Trying")
                         stateFinished()
                     }
 
@@ -935,7 +941,7 @@ class MainViewModel @Inject constructor(
 
                         goTo(
                             "r410 back door",
-                                    "Now that we have that covered, our first stop is room R410. Welcome to NYP, specifically to our engineering department! On this tour, I’ll be showing you some of the facilities we have that support our students in pursuing their goals and dreams.\"",
+                            "Now that we have that covered, our first stop is room R410. Welcome to NYP, specifically to our engineering department! On this tour, I’ll be showing you some of the facilities we have that support our students in pursuing their goals and dreams.\"",
                             true
                         )
 
@@ -1339,10 +1345,66 @@ class MainViewModel @Inject constructor(
 //                        goToSpeed(SpeedLevel.SLOW)
 ////                        goTo("test point 1")
 ////                        goTo("test point 2")
-////                         speak(speak = "What do you do with a drunken sailor. Put him in the bed with the captains daughter. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
+//                         speak(speak = "Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
 //                        goTo("test point 1", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor." , backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
 //                        // speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
 //                        goTo("test point 2", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+
+                        shouldExit = false
+                        var response: String? = null
+                        while(true) {
+                            speak("I will start listening")
+                            listen()
+                            if (userResponse != null && userResponse != " " ) {
+                                response = userResponse
+                                speak("Did you say $userResponse. Please just say yes or no.")
+                                while(true) {
+                                    listen()
+                                    if(userResponse != null && userResponse != " " ) {
+                                        when { // Condition gate based on what the user says
+                                            containsPhraseInOrder(userResponse, reject, true) -> {
+                                                speak("Sorry, lets try this again")
+                                                break
+                                            }
+
+                                            containsPhraseInOrder(userResponse, confirmation, true) -> {
+                                                speak("Great, let me think for a moment")
+                                                shouldExit = true
+                                                break
+                                            }
+
+                                            else -> {
+                                                    speak("Sorry, I did not understand you.")
+                                            }
+                                        }
+                                    }
+                                    buffer()
+                                }
+                                if(shouldExit) break
+                            } else {
+                                speak("Sorry I had an Issue with hearing you.")
+                            }
+                            buffer()
+                        }
+
+//                        speak("Give me a moment, I am thinking.")
+                        Log.i("DEBUG!", response.toString())
+                        response?.let { sendMessage(openAI, it) }
+
+                        playWaitMusic = true
+                        updateGifResource(R.drawable.thinking)
+
+                        conditionGate({responseGPT == null})
+                        Log.i("DEBUG!", responseGPT.toString())
+//
+                        delay(60000)
+                        playWaitMusic = false
+                        updateGifResource(R.drawable.idle)
+
+                        speak(responseGPT.toString())
+                        responseGPT = null
+
+//                        while(true) { buffer() }
                     }
 
                     TourState.GET_USER_NAME -> {
@@ -2157,7 +2219,7 @@ class MainViewModel @Inject constructor(
     private suspend fun conditionGate(trigger: () -> Boolean, log: Boolean = false) {
         // Loop until the trigger condition returns false
         while (trigger()) {
-        if (log) Log.i("DEBUG!", "Trigger: ${trigger()}")
+            if (log) Log.i("DEBUG!", "Trigger: ${trigger()}")
             buffer() // Pause between checks to prevent busy-waiting
         }
 //    Log.i("ConditionGate", "End")

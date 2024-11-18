@@ -31,7 +31,7 @@
             android:value="@string/app_name" />
         <meta-data
             android:name="com.robotemi.sdk.metadata.KIOSK"
-            android:value="TRUE" />
+            android:value="FALSE" />
         <meta-data
             android:name="@string/metadata_permissions"
             android:value="com.robotemi.permission.settings" />

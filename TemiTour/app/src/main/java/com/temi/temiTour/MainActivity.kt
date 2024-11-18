@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaPlayer
 import android.os.Build.VERSION.SDK_INT
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -17,17 +18,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.LifecycleOwner
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
+import com.aallam.openai.api.chat.ChatRole
+import com.aallam.openai.api.chat.chatCompletionRequest
+import com.aallam.openai.api.chat.chatMessage
+import com.aallam.openai.api.model.Model
+import com.aallam.openai.api.model.ModelId
+import com.aallam.openai.client.OpenAI
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
-import android.util.Log
-import androidx.activity.viewModels
-import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.Observer
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -89,6 +95,7 @@ fun MainPage(context: Context, lifecycleOwner: LifecycleOwner) {
     val viewModel: MainViewModel = hiltViewModel()
     val context = LocalContext.current
     val themeMusic = AudioPlayer(context, R.raw.greeting1)
+    val waitMusic = AudioPlayer(context, R.raw.wait_music)
     themeMusic.setVolumeLevel(0.15F)
 
     // Track changes in the imageResource and shouldPlayGif state
@@ -102,6 +109,12 @@ fun MainPage(context: Context, lifecycleOwner: LifecycleOwner) {
                 themeMusic.play()
             } else {
                 themeMusic.stop()
+            }
+
+            if (viewModel.playWaitMusic) {
+                waitMusic.play()
+            } else {
+                waitMusic.stop()
             }
             delay(100L)
         }

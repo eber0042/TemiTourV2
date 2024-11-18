@@ -1,8 +1,6 @@
 package com.temi.temiTour
 
 import android.util.Log
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import com.robotemi.sdk.Robot
 import com.robotemi.sdk.SttLanguage
 import com.robotemi.sdk.listeners.OnRobotReadyListener
@@ -28,13 +26,11 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import javax.inject.Singleton
-
 
 data class TtsStatus(val status: TtsRequest.Status)
 enum class DetectionStateChangedStatus(val state: Int) { // Why is it like this?
@@ -46,14 +42,12 @@ enum class DetectionStateChangedStatus(val state: Int) { // Why is it like this?
         fun fromState(state: Int): DetectionStateChangedStatus? = entries.find { it.state == state }
     }
 }
-
-data class DetectionDataChangedStatus(val angle: Double, val distance: Double)
+data class DetectionDataChangedStatus( val angle: Double, val distance: Double)
 enum class MovementType {
     SKID_JOY,
     TURN_BY,
     NONE
 }
-
 enum class MovementStatus {
     START,
     GOING,
@@ -63,28 +57,22 @@ enum class MovementStatus {
     COMPLETE,
     ABORT
 }
-
 data class MovementStatusChangedStatus(
     val type: MovementType,   // Use the MovementType enum
     val status: MovementStatus  // Use the MovementStatus enum
 )
-
 data class Dragged(
     val state: Boolean
 )
-
 data class Lifted(
     val state: Boolean
 )
-
 data class AskResult(
     val result: String
 )
-
 data class WakeUp(
     val result: String
 )
-
 data class WaveForm(
     val result: ByteArray
 ) {
@@ -101,17 +89,14 @@ data class WaveForm(
         return result.contentHashCode()
     }
 }
-
-data class ConversationStatus(
+data class ConversationStatus (
     val status: Int,
     val text: String
 )
-
-data class ConversationAttached(
+data class ConversationAttached (
     val isAttached: Boolean
 )
-
-enum class LocationState(val value: String) {
+enum class LocationState(val value:String) {
     START(value = "start"),
     CALCULATING(value = "calculating"),
     GOING(value = "going"),
@@ -120,12 +105,10 @@ enum class LocationState(val value: String) {
     REPOSING(value = "reposing");
 
     companion object {
-        fun fromLocationState(value: String): LocationState? =
-            LocationState.entries.find { it.value == value }
+        fun fromLocationState(value: String): LocationState? = LocationState.entries.find { it.value == value }
     }
 }
-
-enum class BeWithMeState(val value: String) {
+enum class BeWithMeState(val value:String) {
     ABORT(value = "abort"),
     CALCULATING(value = "calculating"),
     SEARCH(value = "search"),
@@ -134,8 +117,7 @@ enum class BeWithMeState(val value: String) {
     OBSTACLE_DETECTED(value = "obstacle detected");
 
     companion object {
-        fun fromBeWithMeState(value: String): BeWithMeState? =
-            BeWithMeState.entries.find { it.value == value }
+        fun fromBeWithMeState(value: String): BeWithMeState? = BeWithMeState.entries.find { it.value == value }
     }
 }
 
@@ -148,7 +130,7 @@ object RobotModule {
     fun provideRobotController() = RobotController()
 }
 
-class RobotController() :
+class RobotController():
     OnRobotReadyListener,
     OnDetectionStateChangedListener,
     Robot.TtsListener,
@@ -162,28 +144,26 @@ class RobotController() :
     OnConversationStatusChangedListener,
     Robot.ConversationViewAttachesListener,
     OnGoToLocationStatusChangedListener,
-    OnBeWithMeStatusChangedListener {
+        OnBeWithMeStatusChangedListener
+{
     private val robot = Robot.getInstance() //This is needed to reference the data coming from Temi
 
     // Setting up the Stateflows here
-    private val _ttsStatus = MutableStateFlow(TtsStatus(status = TtsRequest.Status.PENDING))
+    private val _ttsStatus = MutableStateFlow( TtsStatus(status = TtsRequest.Status.PENDING) )
     val ttsStatus = _ttsStatus.asStateFlow()
 
     private val _detectionStateChangedStatus = MutableStateFlow(DetectionStateChangedStatus.IDLE)
     val detectionStateChangedStatus = _detectionStateChangedStatus.asStateFlow()
 
-    private val _detectionDataChangedStatus =
-        MutableStateFlow(DetectionDataChangedStatus(angle = 0.0, distance = 0.0))
-    val detectionDataChangedStatus =
-        _detectionDataChangedStatus.asStateFlow() // This can include talking state as well
+    private val _detectionDataChangedStatus = MutableStateFlow(DetectionDataChangedStatus(angle = 0.0, distance = 0.0))
+    val detectionDataChangedStatus = _detectionDataChangedStatus.asStateFlow() // This can include talking state as well
 
     private val _movementStatusChangedStatus = MutableStateFlow(
         MovementStatusChangedStatus(
             MovementType.NONE, MovementStatus.NODE_INACTIVE
         )
     )
-    val movementStatusChangedStatus =
-        _movementStatusChangedStatus.asStateFlow() // This can include talking state as well
+    val movementStatusChangedStatus = _movementStatusChangedStatus.asStateFlow() // This can include talking state as well
 
     private val _dragged = MutableStateFlow(Dragged(false))
     val dragged = _dragged.asStateFlow() // This can include talking state as well
@@ -228,7 +208,6 @@ class RobotController() :
         robot.addOnGoToLocationStatusChangedListener(this)
         robot.addOnBeWithMeStatusChangedListener(this)
     }
-
     //********************************* General Functions
     suspend fun speak(speech: String, buffer: Long, haveFace: Boolean = true) {
         delay(buffer)
@@ -289,7 +268,6 @@ class RobotController() :
     fun finishConversation() {
         robot.finishConversation()
     }
-
     fun getPosition(): Position {
         return robot.getPosition()
     }
@@ -309,8 +287,7 @@ class RobotController() :
                 // Ensure the first choice isn't the same as the last choice from the previous array
                 if (numberArray[0] == previousLastChoice) {
                     // Find a random index to swap with the first element
-                    val swapIndex =
-                        (1 until numberArray.size).random()  // Get a random index (1..4)
+                    val swapIndex = (1 until numberArray.size).random()  // Get a random index (1..4)
                     val temp = numberArray[0]
                     numberArray[0] = numberArray[swapIndex]
                     numberArray[swapIndex] = temp
@@ -330,106 +307,50 @@ class RobotController() :
             0 -> { // All answers correct
                 Log.d("Quiz", "Perfect")
                 when (choice) {
-                    1 -> speak(
-                        speech = "Oh, you got it right? You want a medal or something?",
-                        buffer
-                    )
-
-                    2 -> speak(
-                        speech = "Congratulations! You must be so proud... of answering a quiz question.",
-                        buffer
-                    )
-
-                    3 -> speak(
-                        speech = "Wow, you did it! Now go do something actually challenging.",
-                        buffer
-                    )
-
-                    4 -> speak(
-                        speech = "You got it right, big deal. Let’s not get carried away.",
-                        buffer
-                    )
-
-                    5 -> speak(
-                        speech = "Perfect score, huh? Enjoy your moment of glory, it’s not lasting long.",
-                        buffer
-                    )
+                    1 -> speak(speech = "Oh, you got it right? You want a medal or something?", buffer)
+                    2 -> speak(speech = "Congratulations! You must be so proud... of answering a quiz question.", buffer)
+                    3 -> speak(speech = "Wow, you did it! Now go do something actually challenging.", buffer)
+                    4 -> speak(speech = "You got it right, big deal. Let’s not get carried away.", buffer)
+                    5 -> speak(speech = "Perfect score, huh? Enjoy your moment of glory, it’s not lasting long.", buffer)
                 }
             }
 
             1 -> { // Partially correct
                 Log.d("Quiz", "Partial")
                 when (choice) {
-                    1 -> speak(
-                        speech = "Almost there... but not quite. Story of your life, huh?",
-                        buffer
-                    )
-
-                    2 -> speak(
-                        speech = "Half right? So close, yet so far. Keep trying, maybe you'll get it one day.",
-                        buffer
-                    )
-
-                    3 -> speak(
-                        speech = "Some of it was right, but seriously, you can do better than that.",
-                        buffer
-                    )
-
-                    4 -> speak(
-                        speech = "You're halfway there! But no, that doesn't count as winning.",
-                        buffer
-                    )
-
-                    5 -> speak(
-                        speech = "Partial credit? I mean, do you want a participation trophy or what?",
-                        buffer
-                    )
+                    1 -> speak(speech = "Almost there... but not quite. Story of your life, huh?", buffer)
+                    2 -> speak(speech = "Half right? So close, yet so far. Keep trying, maybe you'll get it one day.", buffer)
+                    3 -> speak(speech = "Some of it was right, but seriously, you can do better than that.", buffer)
+                    4 -> speak(speech = "You're halfway there! But no, that doesn't count as winning.", buffer)
+                    5 -> speak(speech = "Partial credit? I mean, do you want a participation trophy or what?", buffer)
                 }
             }
 
             2 -> { // All answers wrong
                 Log.d("Quiz", "Incorrect")
                 when (choice) {
-                    1 -> speak(
-                        speech = "Wow. How did you manage to get that wrong? Even my dog knows that one.",
-                        buffer
-                    )
-
-                    2 -> speak(
-                        speech = "Not a single answer right? Impressive... in all the wrong ways.",
-                        buffer
-                    )
-
-                    3 -> speak(
-                        speech = "Oh, you really went for zero, huh? Bold strategy. Let’s see how it works out.",
-                        buffer
-                    )
-
-                    4 -> speak(
-                        speech = "All wrong? I didn’t even think that was possible with how easy these questions are. And yet, here we are.",
-                        buffer
-                    )
-
-                    5 -> speak(
-                        speech = "You do realize that you are meant to select the correct answers, right?",
-                        buffer
-                    )
+                    1 -> speak(speech = "Wow. How did you manage to get that wrong? Even my dog knows that one.", buffer)
+                    2 -> speak(speech = "Not a single answer right? Impressive... in all the wrong ways.", buffer)
+                    3 -> speak(speech = "Oh, you really went for zero, huh? Bold strategy. Let’s see how it works out.", buffer)
+                    4 -> speak(speech = "All wrong? I didn’t even think that was possible with how easy these questions are. And yet, here we are.", buffer)
+                    5 -> speak(speech = "You do realize that you are meant to select the correct answers, right?", buffer)
                 }
             }
         }
     }
 
     //********************************* General Data
-    fun getPositionYaw(): Float {
+    fun getPositionYaw(): Float
+    {
         return robot.getPosition().yaw
     }
 
-    fun volumeControl(volume: Int) {
+    fun volumeControl (volume: Int) {
         robot.volume = volume
     }
 
     fun setMainButtonMode(isEnabled: Boolean) {
-        if (isEnabled) {
+        if (isEnabled){
             robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.ENABLED)
         } else {
             robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.DISABLED)
@@ -475,7 +396,7 @@ class RobotController() :
         robot.setTtsVoice(ttsVoice = TtsVoice(Gender.FEMALE, 1.1F, 4))
         robot.setDetectionModeOn(on = true, distance = 2.0f) // Set how far it can detect stuff
         robot.setKioskModeOn(on = false)
-        robot.volume = 3// set volume to 4
+        robot.volume = 6// set volume to 4
 
         robot.setHardButtonMode(HardButton.VOLUME, HardButton.Mode.DISABLED)
         robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.DISABLED)
@@ -490,8 +411,6 @@ class RobotController() :
         robot.requestToBeKioskApp()
         robot.setKioskModeOn(false)
         Log.i("HOPE!", " In kiosk: ${robot.isKioskModeOn().toString()}")
-
-
     }
 
     override fun onTtsStatusChanged(ttsRequest: TtsRequest) {
@@ -510,10 +429,7 @@ class RobotController() :
 
     override fun onDetectionDataChanged(detectionData: DetectionData) {
         _detectionDataChangedStatus.update {
-            DetectionDataChangedStatus(
-                angle = detectionData.angle,
-                distance = detectionData.distance
-            )
+            DetectionDataChangedStatus(angle = detectionData.angle, distance = detectionData.distance)
         }
     }
 
