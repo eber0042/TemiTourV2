@@ -102,6 +102,9 @@ dependencies {
 
     // OpenAI
     implementation ("com.aallam.openai:openai-client:3.8.2")
+
+    // Accompanist Permissions
+    implementation("com.google.accompanist:accompanist-permissions:0.36.0") // Replace <latest-ver
 }
 
 kapt {

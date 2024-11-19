@@ -67,9 +67,7 @@ data class Dragged(
 data class Lifted(
     val state: Boolean
 )
-data class AskResult(
-    val result: String
-)
+data class AskResult(val result: String, val id: Long = System.currentTimeMillis())
 enum class Language(val value: Int) {
     SYSTEM(0),
     EN_US(1),
@@ -515,9 +513,11 @@ class RobotController():
         _askResult.update {
             AskResult(asrResult)
         }
+
         _language.update {
             Language.fromLanguage(value = sttLanguage.value) ?: return@update it
         }
+
     }
 
     override fun onWakeupWord(wakeupWord: String, direction: Int) {

@@ -239,6 +239,7 @@ class MainViewModel @Inject constructor(
     private var followState = BeWithMeState.CALCULATING
 
     private var triggeredInterrupt: Boolean = false
+
     // Define a mutable map to hold interrupt flags
     private val interruptFlags = mutableMapOf(
         "userMissing" to false,
@@ -303,7 +304,7 @@ class MainViewModel @Inject constructor(
         isTourStateFinished = false
     }
 
-    private suspend fun  setCliffSensorOn(sensorOn: Boolean) {
+    private suspend fun setCliffSensorOn(sensorOn: Boolean) {
         robotController.setCliffSensorOn(sensorOn)
     }
 
@@ -343,17 +344,6 @@ class MainViewModel @Inject constructor(
             buffer()
         }
         conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-    }
-
-    private suspend fun listen() {
-        robotController.wakeUp() // This will start the listen mode
-        conditionGate({ isAttached }) // Wait until listen mode completed
-
-        // Make sure the speech value is updated before using it
-        userResponse =
-            speechUpdatedValue // Store the text from listen mode to be used
-        speechUpdatedValue =
-            null // clear the text to null so show that it has been used
     }
 
     private suspend fun turnBy(degree: Int) {
@@ -562,7 +552,7 @@ class MainViewModel @Inject constructor(
                             )
 
                             // Wait for each sentence to complete before moving to the next
-                            conditionGate ({
+                            conditionGate({
                                 ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
                             })
                         } while (repeatSpeechFlag)
@@ -583,7 +573,8 @@ class MainViewModel @Inject constructor(
                                 do {
                                     // Log.i("DEBUG!", sentence)
                                     // set the repeat flag to false once used
-                                    if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag = false
+                                    if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag =
+                                        false
                                     else if (!setInterruptSystem) {
                                         repeatSpeechFlag = false
                                     }
@@ -597,7 +588,7 @@ class MainViewModel @Inject constructor(
                                     )
 
                                     // Wait for each sentence to complete before moving to the next
-                                    conditionGate ({
+                                    conditionGate({
                                         ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
                                     })
                                 } while (repeatSpeechFlag)
@@ -632,7 +623,15 @@ class MainViewModel @Inject constructor(
 
         var hasGoneToLocation = false
 
-        speak(speak, false, haveFace = haveFace, setInterruptSystem, setInterruptConditionUserMissing, setInterruptConditionUSerToClose, setInterruptConditionDeviceMoved) // *******************************************
+        speak(
+            speak,
+            false,
+            haveFace = haveFace,
+            setInterruptSystem,
+            setInterruptConditionUserMissing,
+            setInterruptConditionUSerToClose,
+            setInterruptConditionDeviceMoved
+        ) // *******************************************
 
 //        updateInterruptFlag("userMissing", setInterruptConditionUserMissing)
 //        updateInterruptFlag("userTooClose", setInterruptConditionUSerToClose)
@@ -641,7 +640,12 @@ class MainViewModel @Inject constructor(
             while (true) { // loop until to makes it to the start location
                 Log.i("DEBUG!", "Has Gone To Location: $hasGoneToLocation")
 
-                if (!triggeredInterrupt && !hasGoneToLocation) { robotController.goTo(location, backwards); Log.i("DEBUG!", "Hello: $repeatGoToFlag ")}
+                if (!triggeredInterrupt && !hasGoneToLocation) {
+                    robotController.goTo(location, backwards); Log.i(
+                        "DEBUG!",
+                        "Hello: $repeatGoToFlag "
+                    )
+                }
 
                 buffer()
                 Log.i("DEBUG!", "Triggered?: ")
@@ -660,13 +664,24 @@ class MainViewModel @Inject constructor(
             while (true) { // loop until to makes it to the start location
                 Log.i("DEBUG!", "Has Gone To Location none: $hasGoneToLocation")
 
-                if (!hasGoneToLocation) { robotController.goTo(location, backwards); Log.i("DEBUG!", "Hello none: $repeatGoToFlag ")}
+                if (!hasGoneToLocation) {
+                    robotController.goTo(location, backwards); Log.i(
+                        "DEBUG!",
+                        "Hello none: $repeatGoToFlag "
+                    )
+                }
 
                 buffer()
                 Log.i("DEBUG!", "Triggered? none: ")
-                conditionGate({ goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT}, true)
+                conditionGate(
+                    { goToLocationState != LocationState.COMPLETE && goToLocationState != LocationState.ABORT },
+                    true
+                )
 
-                Log.i("DEBUG!", "Should exit none" + (hasGoneToLocation && !repeatGoToFlag).toString())
+                Log.i(
+                    "DEBUG!",
+                    "Should exit none" + (hasGoneToLocation && !repeatGoToFlag).toString()
+                )
 
                 if (hasGoneToLocation) break
                 else if (goToLocationState == LocationState.COMPLETE) hasGoneToLocation = true
@@ -677,7 +692,10 @@ class MainViewModel @Inject constructor(
         }
 
         // Log.i("DEBUG!", "THREE: $talkingInThreadFlag")
-        if (speak != null) conditionGate({talkingInThreadFlag}, false)// conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)})
+        if (speak != null) conditionGate(
+            { talkingInThreadFlag },
+            false
+        )// conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)})
 
         // Log.i("DEBUG!", "$location: " + triggeredInterrupt)
         updateInterruptFlag("userMissing", false)
@@ -685,7 +703,8 @@ class MainViewModel @Inject constructor(
         updateInterruptFlag("deviceMoved", false)
     }
 
-    private val apiKey = "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"
+    private val apiKey =
+        "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"
 
     private val openAI = OpenAI(apiKey)
 
@@ -705,7 +724,8 @@ class MainViewModel @Inject constructor(
                 val chatMessages = mutableListOf(
                     chatMessage {
                         role = ChatRole.System
-                        content = "You are an assistant embedded in a robot. Respond as sassy and snarky as possible to user queries. Ensure to keep responses very short so that it is not above 100 words. Ensure to respond in Mandarin (Chinese) and not english"
+                        content =
+                            "You are an assistant embedded in a robot. Respond as sassy and snarky as possible to user queries. Ensure to keep responses very short so that it is not above 100 words. Ensure to respond in Mandarin (Chinese) and not english"
                     },
                     chatMessage {
                         role = ChatRole.User
@@ -733,17 +753,104 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    private suspend fun listen() {
+        robotController.wakeUp() // This will start the listen mode
+        conditionGate({ speechUpdatedValue == null || speechUpdatedValue == " " }) // Wait until listen mode completed
+
+        // Make sure the speech value is updated before using it
+        userResponse =
+            speechUpdatedValue // Store the text from listen mode to be used
+        speechUpdatedValue =
+            null // clear the text to null so show that it has been used
+    }
+
+    private suspend fun askQuestion() {
+        shouldExit = false
+        var noQuestion = false
+        var response: String? = null
+        while (true) {
+            speak(context.getString(R.string.does_anyone_have_a_question))
+
+            listen()
+
+            if (userResponse != null && userResponse != " ") {
+                response = userResponse
+                buffer()
+                if (containsPhraseInOrder(response, reject, true)) {
+//                    speak("hello")
+                    noQuestion = true
+                    break
+                }
+                speak(
+                    context.getString(
+                        R.string.did_you_say_please_just_say_yes_or_no,
+                        userResponse
+                    )
+                )
+                while (true) {
+                    listen()
+                    if (userResponse != null && userResponse != " " && userResponse != "") {
+                        when { // Condition gate based on what the user says
+                            containsPhraseInOrder(userResponse, reject, true) -> {
+                                speak(context.getString(R.string.sorry_lets_try_this_again))
+                                break
+                            }
+
+                            containsPhraseInOrder(userResponse, confirmation, true) -> {
+                                speak(context.getString(R.string.great_let_me_think_for_a_moment))
+                                shouldExit = true
+                                break
+                            }
+
+                            else -> {
+                                speak(context.getString(R.string.sorry_i_did_not_understand_you))
+                            }
+                        }
+                    }
+                    buffer()
+                }
+                if (shouldExit) break
+            } else {
+                speak(context.getString(R.string.sorry_i_had_an_issue_with_hearing_you))
+            }
+            buffer()
+        }
+
+        if (!noQuestion) {
+            Log.i("DEBUG!", response.toString())
+            response?.let { sendMessage(openAI, it) }
+
+            playWaitMusic = true
+            playMusic = false
+            updateGifResource(R.drawable.thinking)
+
+            conditionGate({ responseGPT == null })
+            Log.i("DEBUG!", responseGPT.toString())
+//
+            delay(15000)
+            playWaitMusic = false
+            playMusic = true
+            updateGifResource(R.drawable.idle)
+
+            speak(responseGPT.toString())
+            responseGPT = null
+        }
+    }
+
     init {
 
         // thread used for handling interrupt system
         viewModelScope.launch {
             launch {
-                while(true) {
+                while (true) {
 //                     Log.i("DEBUG!", "In misuse state: ${isMisuseState()}")
-                     Log.i("DEBUG!", "Current Language: ${language.value}")
+                    Log.i("DEBUG!", "Current Language: ${language.value}")
                     if ((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] == true)) {
 
-                        conditionTimer({!((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true)}, interruptTriggerDelay/2)
+                        conditionTimer(
+                            { !((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true) },
+                            interruptTriggerDelay
+                        )
                         if ((yPosition != YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition != YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] != true)) continue
                         Log.i("DEBUG!", "Interrupt 1")
                         triggeredInterrupt = true
@@ -751,7 +858,10 @@ class MainViewModel @Inject constructor(
                         buffer()
                         tiltAngle(20)
 
-                        conditionTimer({!((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true)}, interruptTriggerDelay/2)
+                        conditionTimer(
+                            { !((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true) },
+                            interruptTriggerDelay / 2
+                        )
                         if ((yPosition != YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition != YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] != true)) continue
                         Log.i("DEBUG!", "Interrupt 2")
                         triggeredInterrupt = true
@@ -779,7 +889,7 @@ class MainViewModel @Inject constructor(
 //                        else -> {}
 //                    }
 //                    conditionGate ({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                    conditionTimer({!triggeredInterrupt}, 1)
+                    conditionTimer({ !triggeredInterrupt }, 1)
                 }
                 buffer()
             }
@@ -794,16 +904,16 @@ class MainViewModel @Inject constructor(
                 while (true) { // This will loop the states
 //                    Log.i("DEBUG!", "In start location")
 
-                    tourState(TourState.TESTING)
+//                    tourState(TourState.TESTING)
 //                    tourState(TourState.CHATGPT)
 //
-//                    tourState(TourState.START_LOCATION)
-//                    tourState(TourState.ALTERNATE_START)
-//                    tourState(TourState.STAGE_1_B)
-//                    tourState(TourState.STAGE_1_1_B)
-//                    tourState(TourState.GET_USER_NAME)
-//                    tourState(TourState.STAGE_1_2_B)
-//                    tourState(TourState.TOUR_END)
+                    tourState(TourState.START_LOCATION)
+                    tourState(TourState.ALTERNATE_START)
+                    tourState(TourState.STAGE_1_B)
+                    tourState(TourState.STAGE_1_1_B)
+                    tourState(TourState.GET_USER_NAME)
+                    tourState(TourState.STAGE_1_2_B)
+                    tourState(TourState.TOUR_END)
 
 //                    tourState(TourState.IDLE)
 //                    tourState(TourState.STAGE_1)
@@ -876,16 +986,25 @@ class MainViewModel @Inject constructor(
                             context.getString(R.string.hi_every_one_my_name_is_temi_and_i_will_be_the_one_conducting_this_tour_and_showing_you_our_engineering_department_i_am_very_excited_to_meet_you_all_today)
                         )
 
-                        _gifResource.value  = R.drawable.how_talk
+                        _gifResource.value = R.drawable.how_talk
 
-                        speak(context.getString(R.string.before_we_begin_i_would_like_to_let_everyone_know_that_i_am_able_to_recognise_speech_however_i_can_only_do_this_if_this_icon_pops_up), haveFace = false)
+                        speak(
+                            context.getString(R.string.before_we_begin_i_would_like_to_let_everyone_know_that_i_am_able_to_recognise_speech_however_i_can_only_do_this_if_this_icon_pops_up),
+                            haveFace = false
+                        )
                         robotController.wakeUp() // This will start the listen mode
                         delay(3000)
                         robotController.finishConversation()
-                        speak(context.getString(R.string.when_this_happens_please_respond_and_say_something_once_i_am_not_very_good_yet_at_recognizing_speech_so_if_you_say_something_to_quickly_or_too_many_times_i_will_get_confused_i_will_try_my_best_though), haveFace = false)
-                        speak(context.getString(R.string.should_we_test_this_out_now), haveFace = false)
+                        speak(
+                            context.getString(R.string.when_this_happens_please_respond_and_say_something_once_i_am_not_very_good_yet_at_recognizing_speech_so_if_you_say_something_to_quickly_or_too_many_times_i_will_get_confused_i_will_try_my_best_though),
+                            haveFace = false
+                        )
+                        speak(
+                            context.getString(R.string.should_we_test_this_out_now),
+                            haveFace = false
+                        )
 
-                        _gifResource.value  = R.drawable.idle
+                        _gifResource.value = R.drawable.idle
 
                         getUseConfirmation(
                             context.getString(R.string.is_everyone_ready_for_the_tour_please_just_say_yes_or_no),
@@ -968,7 +1087,10 @@ class MainViewModel @Inject constructor(
 
                     TourState.STAGE_1_B -> {
 
-                        speak(context.getString(R.string.as_i_go_up_this_ramp_please_don_t_assist_me_i_may_struggle_a_bit_because_of_the_black_lines_on_the_ramp_i_rely_on_infrared_sensors_to_detect_sudden_drops_on_the_ground_to_avoid_falling_but_black_absorbs_infrared_light_more_than_other_colors_this_means_the_intensity_of_infrared_light_i_receive_back_is_lower_then_it_otherwise_would_be_this_can_make_it_seem_to_me_like_there_s_a_drop_which_is_why_i_have_difficulty_here_but_don_t_worry_i_m_big_and_strong_enough_to_handle_it_on_my_own), setConditionGate = false)
+                        speak(
+                            context.getString(R.string.as_i_go_up_this_ramp_please_don_t_assist_me_i_may_struggle_a_bit_because_of_the_black_lines_on_the_ramp_i_rely_on_infrared_sensors_to_detect_sudden_drops_on_the_ground_to_avoid_falling_but_black_absorbs_infrared_light_more_than_other_colors_this_means_the_intensity_of_infrared_light_i_receive_back_is_lower_then_it_otherwise_would_be_this_can_make_it_seem_to_me_like_there_s_a_drop_which_is_why_i_have_difficulty_here_but_don_t_worry_i_m_big_and_strong_enough_to_handle_it_on_my_own),
+                            setConditionGate = false
+                        )
 
                         goTo("before ramp")
                         skidJoy(1.0F, 0.0F, 8)
@@ -1245,28 +1367,61 @@ class MainViewModel @Inject constructor(
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r417
                                     // speak(script, haveFace = false)
-                                    goTo(location, script, haveFace = false, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                                    goTo(
+                                        location,
+                                        script,
+                                        haveFace = false,
+                                        backwards = backwards,
+                                        setInterruptSystem = true,
+                                        setInterruptConditionUserMissing = true,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
                                     buffer()
                                     _shouldPlayGif.value = true
+                                    askQuestion()
                                 }
 
                                 "r416" -> {
                                     delay(1000)
                                     script =
                                         context.getString(R.string.in_front_of_you_is_the_mechatronics_systems_integration_lab_in_this_lab_students_will_acquire_the_skills_needed_to_program_microcontrollers_to_control_peripherals_a_microcontroller_is_a_small_computer_built_into_a_metal_oxide_semiconductor_integrated_circuit_it_is_the_heart_of_many_automatically_controlled_products_and_devices_such_as_implantable_medical_devices_smart_devices_sensors_and_more_with_the_advancement_of_technology_microcontrollers_have_become_an_integral_part_of_connecting_our_physical_environment_to_the_digital_world_thereby_improving_our_lives)
-                                    goTo(location, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                                    goTo(
+                                        location,
+                                        backwards = backwards,
+                                        setInterruptSystem = true,
+                                        setInterruptConditionUserMissing = true,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r416
-                                    speak(script, haveFace = false, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                                    speak(
+                                        script,
+                                        haveFace = false,
+                                        setInterruptSystem = true,
+                                        setInterruptConditionUserMissing = true,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
                                     buffer()
                                     _shouldPlayGif.value = true
+                                    askQuestion()
                                 }
 
                                 "trophy cabinet 1" -> {
                                     delay(1000)
                                     script =
                                         context.getString(R.string.our_next_stop_is_the_nyp_trophy_cabinet_first_and_foremost_on_display_are_the_many_trophies_we_have_won_as_champions_in_various_robot_categories_at_the_annual_singapore_robotics_games_different_robots_such_as_legged_robots_and_snakes_were_designed_built_and_developed_in_house_to_participate_in_sprints_long_distance_races_and_even_entertainment_challenges)
-                                    goTo(location, speak = script, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                                    goTo(
+                                        location,
+                                        speak = script,
+                                        backwards = backwards,
+                                        setInterruptSystem = true,
+                                        setInterruptConditionUserMissing = true,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
                                 }
 
                                 "award exit" -> {
@@ -1274,7 +1429,16 @@ class MainViewModel @Inject constructor(
                                         context.getString(R.string.our_students_have_not_only_used_their_creativity_in_competitions_but_also_in_developing_products_to_solve_real_world_problems_and_address_industry_needs_on_display_you_can_see_examples_of_products_jointly_developed_by_both_students_and_staff_during_the_students_final_year_projects_over_a_3_month_period_students_are_tasked_with_designing_and_implementing_solutions_some_of_these_outputs_are_directly_translated_into_industry_projects_which_have_been_in_collaboration_with_seg_since_nyp_s_founding_in_1993)
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.trophy
-                                    goTo(location, speak = script, haveFace = false, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                                    goTo(
+                                        location,
+                                        speak = script,
+                                        haveFace = false,
+                                        backwards = backwards,
+                                        setInterruptSystem = true,
+                                        setInterruptConditionUserMissing = true,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
                                     buffer()
                                     _shouldPlayGif.value = true
                                 }
@@ -1286,24 +1450,56 @@ class MainViewModel @Inject constructor(
                                                 context.getString(R.string.with_these_skill_sets_students_can_pursue_careers_as_robotics_engineers_quality_control_engineers_or_system_engineers_where_robotic_systems_and_vision_technologies_are_deployed_in_various_applications)
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r405
-                                    goTo(location, speak = script, haveFace = false, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                                    goTo(
+                                        location,
+                                        speak = script,
+                                        haveFace = false,
+                                        backwards = backwards,
+                                        setInterruptSystem = true,
+                                        setInterruptConditionUserMissing = true,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
                                     buffer()
                                     _shouldPlayGif.value = true
+                                    askQuestion()
                                 }
 
                                 "r412" -> {
                                     script =
                                         context.getString(R.string.too_your_left_is_the_siemens_control_lab_where_our_learners_gain_knowledge_in_areas_such_as_pneumatics_sensors_and_programmable_logic_controllers_also_known_as_plcs_here_actions_like_pick_and_place_are_practiced_and_applied_hands_on_using_industry_standard_equipment_from_siemens_this_provides_our_students_with_first_hand_experience_with_the_technologies_and_skills_the_industry_is_seeking)
-                                    goTo(location, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                                    goTo(
+                                        location,
+                                        backwards = backwards,
+                                        setInterruptSystem = true,
+                                        setInterruptConditionUserMissing = true,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r412
-                                    speak(script, haveFace = false, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                                    speak(
+                                        script,
+                                        haveFace = false,
+                                        setInterruptSystem = true,
+                                        setInterruptConditionUserMissing = true,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
                                     buffer()
                                     _shouldPlayGif.value = true
+                                    askQuestion()
                                 }
 
                                 "r410 poster spot" -> {
-                                    goTo(location, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                                    goTo(
+                                        location,
+                                        backwards = backwards,
+                                        setInterruptSystem = true,
+                                        setInterruptConditionUserMissing = true,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
                                 }
 
                                 else -> {}
@@ -1391,13 +1587,13 @@ class MainViewModel @Inject constructor(
 //                        goToSpeed(SpeedLevel.SLOW)
 ////                        goTo("test point 1")
 ////                        goTo("test point 2")
-                        val speech1 = "Go to test point 1, backwards, interrupt system, interrupt if user missing, but do not interrupt if user is close, and don't interrupt if the device moves."
-                        val speech2 = "Move to test point 2, backwards, interrupt system, and only interrupt if the user is missing. Do not interrupt if the user is close, and if the device moves, don't interrupt."
-//                         speak(speak = "Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
-                        goTo("test point 1" , speak = speech1, backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-//                         speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-                        goTo("test point 2", speak = speech2, backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-
+//                        val speech1 = "Go to test point 1, backwards, interrupt system, interrupt if user missing, but do not interrupt if user is close, and don't interrupt if the device moves."
+//                        val speech2 = "Move to test point 2, backwards, interrupt system, and only interrupt if the user is missing. Do not interrupt if the user is close, and if the device moves, don't interrupt."
+////                         speak(speak = "Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
+//                        goTo("test point 1" , speak = speech1, backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+////                         speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+//                        goTo("test point 2", speak = speech2, backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                        askQuestion()
 //                        while(true) { buffer() }
 //                        speak("李老师您好，您能理解吗？")
 //                        listen()
@@ -1425,7 +1621,8 @@ class MainViewModel @Inject constructor(
                                         context.getString(
                                             R.string.i_think_your_name_is_is_that_correct,
                                             userName
-                                        ))
+                                        )
+                                    )
 
                                     while (true) {
                                         listen()
@@ -1475,7 +1672,8 @@ class MainViewModel @Inject constructor(
                                 context.getString(
                                     R.string.hi_there_my_name_is_temi_it_s_nice_to_meet_you,
                                     userName
-                                ))
+                                )
+                            )
                         }
 
                         stateFinished()
@@ -1483,27 +1681,37 @@ class MainViewModel @Inject constructor(
 
                     TourState.CHATGPT -> {
                         shouldExit = false
+                        var noQuestion = false
                         var response: String? = null
-                        while(true) {
-                            speak(context.getString(R.string.i_will_start_listening))
+                        while (true) {
+                            speak(context.getString(R.string.does_anyone_have_a_question))
                             listen()
-                            if (userResponse != null && userResponse != " " ) {
+                            if (userResponse != null && userResponse != " ") {
                                 response = userResponse
+                                if (containsPhraseInOrder(userResponse, reject, true)) {
+                                    noQuestion = true
+                                    break
+                                }
                                 speak(
                                     context.getString(
                                         R.string.did_you_say_please_just_say_yes_or_no,
                                         userResponse
-                                    ))
-                                while(true) {
+                                    )
+                                )
+                                while (true) {
                                     listen()
-                                    if(userResponse != null && userResponse != " " ) {
+                                    if (userResponse != null && userResponse != " ") {
                                         when { // Condition gate based on what the user says
                                             containsPhraseInOrder(userResponse, reject, true) -> {
                                                 speak(context.getString(R.string.sorry_lets_try_this_again))
                                                 break
                                             }
 
-                                            containsPhraseInOrder(userResponse, confirmation, true) -> {
+                                            containsPhraseInOrder(
+                                                userResponse,
+                                                confirmation,
+                                                true
+                                            ) -> {
                                                 speak(context.getString(R.string.great_let_me_think_for_a_moment))
                                                 shouldExit = true
                                                 break
@@ -1516,29 +1724,30 @@ class MainViewModel @Inject constructor(
                                     }
                                     buffer()
                                 }
-                                if(shouldExit) break
+                                if (shouldExit) break
                             } else {
                                 speak(context.getString(R.string.sorry_i_had_an_issue_with_hearing_you))
                             }
                             buffer()
                         }
 
-//                        speak("Give me a moment, I am thinking.")
-                        Log.i("DEBUG!", response.toString())
-                        response?.let { sendMessage(openAI, it) }
+                        if (!noQuestion) {
+                            Log.i("DEBUG!", response.toString())
+                            response?.let { sendMessage(openAI, it) }
 
-                        playWaitMusic = true
-                        updateGifResource(R.drawable.thinking)
+                            playWaitMusic = true
+                            updateGifResource(R.drawable.thinking)
 
-                        conditionGate({responseGPT == null})
-                        Log.i("DEBUG!", responseGPT.toString())
+                            conditionGate({ responseGPT == null })
+                            Log.i("DEBUG!", responseGPT.toString())
 //
-                        delay(10000)
-                        playWaitMusic = false
-                        updateGifResource(R.drawable.idle)
+                            delay(20000)
+                            playWaitMusic = false
+                            updateGifResource(R.drawable.idle)
 
-                        speak(responseGPT.toString())
-                        responseGPT = null
+                            speak(responseGPT.toString())
+                            responseGPT = null
+                        }
                     }
 
                     TourState.TEMI_V2 -> {
@@ -2210,25 +2419,27 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             var speech: String? = null
 
+            // Collect results in a separate coroutine
             val job = launch {
                 askResult.collect { status ->
+                    Log.i("HELP!", "$status")
+                    robotController.finishConversation()
                     speechUpdatedValue = status.result
                     speech = status.result
                 }
             }
 
-            while (true) {
-                if (conversationAttached.value.isAttached) {
-                    speech = null
-                    while (speech == null) {
-                        buffer()
-                    }
-                    robotController.finishConversation()
-                }
-                buffer()
-            }
-
-            job.cancel()
+//            while (true) {
+//                if (conversationAttached.value.isAttached) {
+//                    // Reset speech and wait for a new result
+//                    speech = null
+//                    while (speech == null) {
+//                        delay(50) // Adjust delay as needed
+//                    }
+//                    robotController.finishConversation()
+//                }
+//                delay(100) // Prevent excessive CPU usage
+//            }
         }
     }
 
@@ -2284,7 +2495,7 @@ class MainViewModel @Inject constructor(
     private suspend fun conditionGate(trigger: () -> Boolean, log: Boolean = false) {
         // Loop until the trigger condition returns false
         while (trigger()) {
-//            if (log) Log.i("DEBUG!", "Trigger: ${trigger()}")
+            if (log) Log.i("HELP!", "Trigger: ${trigger()}")
             buffer() // Pause between checks to prevent busy-waiting
         }
 //    Log.i("ConditionGate", "End")

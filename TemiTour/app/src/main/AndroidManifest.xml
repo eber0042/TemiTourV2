@@ -4,6 +4,14 @@
 
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <uses-permission android:name="android.permission.SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <application
         android:name=".MainApplication"
         android:allowBackup="true"
@@ -31,7 +39,7 @@
             android:value="@string/app_name" />
         <meta-data
             android:name="com.robotemi.sdk.metadata.KIOSK" android:value="true" />
-        <meta-data android:name="@string/metadata_override_conversation_layer" android:value="true" />
+        <meta-data android:name="@string/metadata_override_conversation_layer" android:value="false" />
         <meta-data
             android:name="@string/metadata_permissions" android:value="com.robotemi.permission.settings" />
     </application>

@@ -48,7 +48,7 @@
 <!--    <string name="sorry_i_didn_t_hear_you_could_you_repeat_yourself">Sorry, I didn’t hear you. Could you repeat yourself?</string>-->
 <!--    <string name="it_seems_i_couldn_t_get_your_name_feel_free_to_introduce_yourself_again_later">It seems I couldn\'t get your name. Feel free to introduce yourself again later.</string>-->
 <!--    <string name="hi_there_my_name_is_temi_it_s_nice_to_meet_you">Hi there, %1$s. My name is Temi. It\'s nice to meet you.</string>-->
-<!--    <string name="i_will_start_listening">I will start listening</string>-->
+<!--    <string name="does_anyone_have_a_question">Does anyone have a question?</string>-->
 <!--    <string name="did_you_say_please_just_say_yes_or_no">Did you say %1$s. Please just say yes or no.</string>-->
 <!--    <string name="sorry_lets_try_this_again">Sorry, lets try this again</string>-->
 <!--    <string name="great_let_me_think_for_a_moment">Great, let me think for a moment</string>-->
@@ -120,7 +120,7 @@
     <string name="sorry_i_didn_t_hear_you_could_you_repeat_yourself">抱歉，我没有听清楚。你能再说一遍吗？</string>
     <string name="it_seems_i_couldn_t_get_your_name_feel_free_to_introduce_yourself_again_later">似乎我没能听到你的名字，随时可以再次介绍自己。</string>
     <string name="hi_there_my_name_is_temi_it_s_nice_to_meet_you">你好，我的名字是Temi，很高兴见到你 %1$s。</string>
-    <string name="i_will_start_listening">我会开始聆听了</string>
+    <string name="does_anyone_have_a_question">有人有问题</string>
     <string name="did_you_say_please_just_say_yes_or_no">你说的是%1$s吗？请只说“是”或“不是”。</string>
     <string name="sorry_lets_try_this_again">抱歉，让我们再试一次。</string>
     <string name="great_let_me_think_for_a_moment">太好了，让我想一想</string>
@@ -132,12 +132,12 @@
     <string name="in_addition_to_programming_robots_machine_vision_plays_an_important_role_in_robotic_systems_enabling_intelligent_decision_making_for_complex_tasks_students_will_learn_to_perform_identification_and_inspection_using_industrial_grade_vision_systems">除了编程机器人，机器视觉在机器人系统中扮演着重要角色，它使得机器人能够为复杂任务做出智能决策。学生们将学习如何使用工业级视觉系统进行识别和检查。</string>
     <string name="with_these_skill_sets_students_can_pursue_careers_as_robotics_engineers_quality_control_engineers_or_system_engineers_where_robotic_systems_and_vision_technologies_are_deployed_in_various_applications">通过这些技能，学生们可以从事机器人工程师、质量控制工程师或系统工程师等职业，机器人系统和视觉技术被应用于各个领域。</string>
 
-<string name="hi_there_would_you_like_to_take_a_tour_please_just_say_yes_or_no">你好，您想参加导览吗？请只说“是”或“否”。</string>
-<string name="ok_if_you_change_your_mind_feel_free_to_come_back_and_ask">好的，如果您改变主意，随时可以回来询问。</string>
-<string name="i_will_now_begin_the_tour_please_follow_me">我现在开始导览，请跟我来！</string>
-<string name="sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back">抱歉，您目前离我太近了，请您后退几步。</string>
-<string name="welcome_to_block_r_level_4_before_we_begin_i_would_like_to_explain_a_couple_of_my_capabilities">欢迎来到R区4层。在我们开始之前，我想解释一下我的一些功能。</string>
-<string name="please_stand_in_front_of_me_and_i_will_begin_the_tour">请站在我前面，我将开始导览。</string>
-<string name="sorry_i_need_you_to_stand_in_front_of_me_to_begin_the_tour">抱歉，我需要您站在我前面才能开始导览。</string>
+    <string name="hi_there_would_you_like_to_take_a_tour_please_just_say_yes_or_no">你好，您想参加导览吗？请只说“是”或“否”。</string>
+    <string name="ok_if_you_change_your_mind_feel_free_to_come_back_and_ask">好的，如果您改变主意，随时可以回来询问。</string>
+    <string name="i_will_now_begin_the_tour_please_follow_me">我现在开始导览，请跟我来！</string>
+    <string name="sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back">抱歉，您目前离我太近了，请您后退几步。</string>
+    <string name="welcome_to_block_r_level_4_before_we_begin_i_would_like_to_explain_a_couple_of_my_capabilities">欢迎来到R区4层。在我们开始之前，我想解释一下我的一些功能。</string>
+    <string name="please_stand_in_front_of_me_and_i_will_begin_the_tour">请站在我前面，我将开始导览。</string>
+    <string name="sorry_i_need_you_to_stand_in_front_of_me_to_begin_the_tour">抱歉，我需要您站在我前面才能开始导览。</string>
 
 </resources>
