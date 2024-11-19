@@ -92,8 +92,8 @@ class AudioPlayer(context: Context, private val mediaResId: Int) {
 
 @Composable
 fun MainPage(context: Context, lifecycleOwner: LifecycleOwner) {
-    val viewModel: MainViewModel = hiltViewModel()
     val context = LocalContext.current
+    val viewModel: MainViewModel = hiltViewModel()
     val themeMusic = AudioPlayer(context, R.raw.greeting1)
     val waitMusic = AudioPlayer(context, R.raw.wait_music)
     themeMusic.setVolumeLevel(0.15F)

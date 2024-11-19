@@ -70,6 +70,42 @@ data class Lifted(
 data class AskResult(
     val result: String
 )
+enum class Language(val value: Int) {
+    SYSTEM(0),
+    EN_US(1),
+    ZH_CN(2),
+    ZH_HK(3),
+    ZH_TW(4),
+    TH_TH(5),
+    HE_IL(6),
+    KO_KR(7),
+    JA_JP(8),
+    IN_ID(9),
+    ID_ID(10),
+    DE_DE(11),
+    FR_FR(12),
+    FR_CA(13),
+    PT_BR(14),
+    AR_EG(15),
+    AR_AE(16),
+    AR_XA(17),
+    RU_RU(18),
+    IT_IT(19),
+    PL_PL(20),
+    ES_ES(21),
+    CA_ES(22),
+    HI_IN(23),
+    ET_EE(24),
+    TR_TR(25),
+    EN_IN(26),
+    MS_MY(27),
+    VI_VN(28),
+    EL_GR(29);
+
+    companion object {
+        fun fromLanguage(value: Int): Language? = Language.entries.find { it.value == value }
+    }
+}
 data class WakeUp(
     val result: String
 )
@@ -174,6 +210,9 @@ class RobotController():
     private val _askResult = MutableStateFlow(AskResult(" "))
     val askResult = _askResult.asStateFlow()
 
+    private val _language = MutableStateFlow(Language.SYSTEM)
+    val language = _language.asStateFlow()
+
     private val _wakeUp = MutableStateFlow(WakeUp("56"))
     val wakeUp = _wakeUp.asStateFlow()
 
@@ -207,6 +246,7 @@ class RobotController():
         robot.addConversationViewAttachesListener(this)
         robot.addOnGoToLocationStatusChangedListener(this)
         robot.addOnBeWithMeStatusChangedListener(this)
+        robot.addOnBeWithMeStatusChangedListener(this)
     }
     //********************************* General Functions
     suspend fun speak(speech: String, buffer: Long, haveFace: Boolean = true) {
@@ -215,7 +255,10 @@ class RobotController():
             speech = speech,
             isShowOnConversationLayer = false,
             showAnimationOnly = haveFace,
-        ) // Need to create TtsRequest
+            language = TtsRequest.Language.ZH_CN
+        )
+
+        // Need to create TtsRequest
         robot.speak(request)
         delay(buffer)
     }
@@ -262,7 +305,7 @@ class RobotController():
     }
 
     fun wakeUp() {
-        robot.wakeup()
+        robot.wakeup(listOf(SttLanguage.ZH_CN))
     }
 
     fun finishConversation() {
@@ -471,6 +514,9 @@ class RobotController():
     override fun onAsrResult(asrResult: String, sttLanguage: SttLanguage) {
         _askResult.update {
             AskResult(asrResult)
+        }
+        _language.update {
+            Language.fromLanguage(value = sttLanguage.value) ?: return@update it
         }
     }
 

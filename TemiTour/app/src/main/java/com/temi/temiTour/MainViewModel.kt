@@ -1,6 +1,12 @@
 package com.temi.temiTour
 
+import android.annotation.SuppressLint
+import android.app.Application
+import android.content.Context
+import android.provider.Settings.Global.getString
 import android.util.Log
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
@@ -26,6 +32,7 @@ import com.aallam.openai.api.chat.chatMessage
 import com.aallam.openai.api.model.Model
 import com.aallam.openai.api.model.ModelId
 import com.aallam.openai.client.OpenAI
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
@@ -89,12 +96,14 @@ enum class TourState {
     NULL,
     TESTING,
     GET_USER_NAME,
+    CHATGPT,
     TEMI_V2
 }
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val robotController: RobotController,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     // These collect data from services in robotController
@@ -105,6 +114,7 @@ class MainViewModel @Inject constructor(
     private val lifted = robotController.lifted
     private val dragged = robotController.dragged
     private val askResult = robotController.askResult
+    private val language = robotController.language
     private val wakeUp = robotController.wakeUp
     private val waveForm = robotController.waveform
     private val conversationStatus = robotController.conversationStatus
@@ -164,16 +174,17 @@ class MainViewModel @Inject constructor(
     //******************************************** Stuff for the tour
     // key word lists
     private val confirmation = listOf(
-        "yes", "sure", "okay", "I’m in", "count me in", "definitely",
-        "absolutely", "right now", "let's go", "I’ll be there",
-        "sounds great", "I can make it", "I'm ready", "let's do it",
-        "for sure", "on my way", "I'll come"
+        "是", "好的", "行", "我愿意", "算我一个", "绝对没问题",
+        "当然", "现在就", "走吧", "我会到的",
+        "听起来不错", "我可以参加", "我准备好了", "就这么定了",
+        "一定", "我在路上", "我会来"
     )
+
     private val reject = listOf(
-        "no", "not now", "can't", "not attending", "can't make it",
-        "not possible", "sorry", "I have plans", "not going",
-        "unfortunately not", "I can't do it", "regretfully no",
-        "pass", "no thanks", "I’m busy", "I need to decline"
+        "不", "现在不行", "不能", "不参加", "赶不上",
+        "不可能", "抱歉", "我有安排", "不去",
+        "很遗憾不能", "我做不到", "遗憾地说不",
+        "不行", "不用了", "我很忙", "我需要拒绝"
     )
 
     // Function to check for keywords or phrases
@@ -431,7 +442,7 @@ class MainViewModel @Inject constructor(
                     time = 50
                 )
                 if (yPosition != YDirection.CLOSE) {
-                    robotController.speak(" Thank you", buffer)
+                    robotController.speak(context.getString(R.string.thank_you), buffer)
                     conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
                 }
             }
@@ -440,17 +451,30 @@ class MainViewModel @Inject constructor(
 
     private fun extractName(userResponse: String): String? {
         // Define common patterns for introducing names
+//        val namePatterns = listOf(
+//            "my name is ([A-Za-z]+)",  // e.g., "My name is John"
+//            "i am ([A-Za-z]+)",        // e.g., "I am Alice"
+//            "it's ([A-Za-z]+)",        // e.g., "It's Bob"
+//            "this is ([A-Za-z]+)",     // e.g., "This is Sarah"
+//            "call me ([A-Za-z]+)",     // e.g., "Call me Mike"
+//            "name is ([A-Za-z]+)",
+//            "is ([A-Za-z]+)",
+//            "me ([A-Za-z]+)",
+//            "i ([A-Za-z]+)",
+//            "am ([A-Za-z]+)"
+//        )
+
         val namePatterns = listOf(
-            "my name is ([A-Za-z]+)",  // e.g., "My name is John"
-            "i am ([A-Za-z]+)",        // e.g., "I am Alice"
-            "it's ([A-Za-z]+)",        // e.g., "It's Bob"
-            "this is ([A-Za-z]+)",     // e.g., "This is Sarah"
-            "call me ([A-Za-z]+)",     // e.g., "Call me Mike"
-            "name is ([A-Za-z]+)",
-            "is ([A-Za-z]+)",
-            "me ([A-Za-z]+)",
-            "i ([A-Za-z]+)",
-            "am ([A-Za-z]+)"
+            "我叫([\\u4e00-\\u9fa5]+)",  // e.g., "我叫小明"
+            "我的名字是([\\u4e00-\\u9fa5]+)",  // e.g., "我的名字是李华"
+            "我是([\\u4e00-\\u9fa5]+)",  // e.g., "我是张伟"
+            "这是([\\u4e00-\\u9fa5]+)",  // e.g., "这是王芳"
+            "叫我([\\u4e00-\\u9fa5]+)",  // e.g., "叫我小李"
+            "名字是([\\u4e00-\\u9fa5]+)",  // e.g., "名字是陈琳"
+            "是([\\u4e00-\\u9fa5]+)",  // e.g., "是刘强"
+            "我([\\u4e00-\\u9fa5]+)",  // e.g., "我李杰"
+            "叫([\\u4e00-\\u9fa5]+)",  // e.g., "叫韩梅"
+            "名([\\u4e00-\\u9fa5]+)"  // e.g., "名赵云"
         )
 
         // Iterate over each pattern to try to match the user's response
@@ -465,7 +489,8 @@ class MainViewModel @Inject constructor(
         }
 
         // If no pattern matches, check if the userResponse is a single word and return it
-        val singleWordPattern = Pattern.compile("^[A-Za-z]+$", Pattern.CASE_INSENSITIVE)
+//        val singleWordPattern = Pattern.compile("^[A-Za-z]+$", Pattern.CASE_INSENSITIVE)
+        val singleWordPattern = Pattern.compile("^[\\u4e00-\\u9fa5]+$", Pattern.CASE_INSENSITIVE)
         val singleWordMatcher = singleWordPattern.matcher(userResponse.trim())
 
         return if (singleWordMatcher.matches()) userResponse.trim() else null
@@ -680,7 +705,7 @@ class MainViewModel @Inject constructor(
                 val chatMessages = mutableListOf(
                     chatMessage {
                         role = ChatRole.System
-                        content = "You are an assistant embedded in a robot. Respond as sassy and snarky as possible to user queries. Ensure to keep responses very short so that it is not above 100 words."
+                        content = "You are an assistant embedded in a robot. Respond as sassy and snarky as possible to user queries. Ensure to keep responses very short so that it is not above 100 words. Ensure to respond in Mandarin (Chinese) and not english"
                     },
                     chatMessage {
                         role = ChatRole.User
@@ -715,7 +740,7 @@ class MainViewModel @Inject constructor(
             launch {
                 while(true) {
 //                     Log.i("DEBUG!", "In misuse state: ${isMisuseState()}")
-//                     Log.i("DEBUG!", "Flag: $yPosition")
+                     Log.i("DEBUG!", "Current Language: ${language.value}")
                     if ((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] == true)) {
                         conditionTimer({!((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true)}, interruptTriggerDelay)
                         if ((yPosition != YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition != YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] != true)) continue
@@ -757,15 +782,16 @@ class MainViewModel @Inject constructor(
                 while (true) { // This will loop the states
 //                    Log.i("DEBUG!", "In start location")
 
-                    tourState(TourState.TESTING)
+//                    tourState(TourState.TESTING)
+//                    tourState(TourState.CHATGPT)
 
-//                    tourState(TourState.START_LOCATION)
-//                    tourState(TourState.ALTERNATE_START)
-//                    tourState(TourState.STAGE_1_B)
-//                    tourState(TourState.STAGE_1_1_B)
-//                    tourState(TourState.GET_USER_NAME)
-//                    tourState(TourState.STAGE_1_2_B)
-//                    tourState(TourState.TOUR_END)
+                    tourState(TourState.START_LOCATION)
+                    tourState(TourState.ALTERNATE_START)
+                    tourState(TourState.STAGE_1_B)
+                    tourState(TourState.STAGE_1_1_B)
+                    tourState(TourState.GET_USER_NAME)
+                    tourState(TourState.STAGE_1_2_B)
+                    tourState(TourState.TOUR_END)
 
 //                    tourState(TourState.IDLE)
 //                    tourState(TourState.STAGE_1)
@@ -789,16 +815,16 @@ class MainViewModel @Inject constructor(
                         stateMode(State.CONSTRAINT_FOLLOW)
 
                         getUseConfirmation(
-                            "Hi there, would you like to take a tour? Please just say yes or no.",
-                            "Ok, if you change your mind feel free to come back and ask.",
+                            context.getString(R.string.hi_there_would_you_like_to_take_a_tour_please_just_say_yes_or_no),
+                            context.getString(R.string.ok_if_you_change_your_mind_feel_free_to_come_back_and_ask),
                             5000L,
-                            "Yay, I am so excited",
-                            "Sorry, I did not understand what you said. Could you repeat yourself.",
-                            "You do not have to ignore me. I have feelings too you know."
+                            context.getString(R.string.yay_i_am_so_excited),
+                            context.getString(R.string.sorry_i_did_not_understand_what_you_said_could_you_repeat_yourself),
+                            context.getString(R.string.you_do_not_have_to_ignore_me_i_have_feelings_too_you_know)
                         ) {
                             exitCaseCheckIfUserClose(
-                                "I will now begin the tour. Please follow me!",
-                                "Sorry, you are currently too close to me, may you please take a couple steps back?"
+                                context.getString(R.string.i_will_now_begin_the_tour_please_follow_me),
+                                context.getString(R.string.sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back)
                             )
                         }
 
@@ -808,15 +834,14 @@ class MainViewModel @Inject constructor(
                     TourState.ALTERNATE_START -> {
                         setMainButtonMode(true)
                         conditionGate({ followState != BeWithMeState.TRACK })
-                        speak("I am now following you")
+                        speak(context.getString(R.string.i_am_now_following_you))
 
                         val excitementPhrases = listOf(
-                            "I am so excited!",
-                            "I can’t wait to start this tour!",
-                            "This is going to be so much fun!",
-                            "I cannot wait to show them around!",
-                            "I can not wait to get this adventure started!",
-                            "I am so excited!"
+                            context.getString(R.string.i_am_so_excited),
+                            context.getString(R.string.i_can_t_wait_to_start_this_tour),
+                            context.getString(R.string.this_is_going_to_be_so_much_fun),
+                            context.getString(R.string.i_cannot_wait_to_show_them_around),
+                            context.getString(R.string.i_can_not_wait_to_get_this_adventure_started)
                         )
 
                         // While loop to monitor the follow state and express excitement
@@ -829,38 +854,38 @@ class MainViewModel @Inject constructor(
                             conditionTimer({ followState == BeWithMeState.ABORT }, 5)
                         }
 
-                        speak("Thank you very much for the head pats")
+                        speak(context.getString(R.string.thank_you_very_much_for_the_head_pats))
 
                         playMusic = true
 
                         setMainButtonMode(false)
                         goTo(
-                            "greet tour",
-                            "Hi every one, my name is Temi and I will be the one conducting this tour and showing you our engineering department. I am very excited to meet you all today. "
+                            context.getString(R.string.greet_tour),
+                            context.getString(R.string.hi_every_one_my_name_is_temi_and_i_will_be_the_one_conducting_this_tour_and_showing_you_our_engineering_department_i_am_very_excited_to_meet_you_all_today)
                         )
 
                         _gifResource.value  = R.drawable.how_talk
 
-                        speak("Before we begin, I would like to let everyone know that I am able to recognise speech. However, I can only do this if this icon pops up.", haveFace = false)
+                        speak(context.getString(R.string.before_we_begin_i_would_like_to_let_everyone_know_that_i_am_able_to_recognise_speech_however_i_can_only_do_this_if_this_icon_pops_up), haveFace = false)
                         robotController.wakeUp() // This will start the listen mode
                         delay(3000)
                         robotController.finishConversation()
-                        speak("When this happens, please respond and say something once. I am not very good yet at recognizing speech, so if you say something to quickly or too many times I will get confused. I will try my best though.", haveFace = false)
-                        speak("Should we test this out now?", haveFace = false)
+                        speak(context.getString(R.string.when_this_happens_please_respond_and_say_something_once_i_am_not_very_good_yet_at_recognizing_speech_so_if_you_say_something_to_quickly_or_too_many_times_i_will_get_confused_i_will_try_my_best_though), haveFace = false)
+                        speak(context.getString(R.string.should_we_test_this_out_now), haveFace = false)
 
                         _gifResource.value  = R.drawable.idle
 
                         getUseConfirmation(
-                            "Is everyone ready for the tour? Please just say yes or no!",
-                            "Well to bad, we are doing it anyway",
+                            context.getString(R.string.is_everyone_ready_for_the_tour_please_just_say_yes_or_no),
+                            context.getString(R.string.well_to_bad_we_are_doing_it_anyway),
                             5000L,
-                            "Yay, I am so excited",
-                            "Sorry, I did not understand what you said. Could you repeat yourself.",
-                            "You do not have to ignore me. I have feelings too you know."
+                            context.getString(R.string.yay_i_am_so_excited),
+                            context.getString(R.string.sorry_i_did_not_understand_what_you_said_could_you_repeat_yourself),
+                            context.getString(R.string.you_do_not_have_to_ignore_me_i_have_feelings_too_you_know)
                         ) {
                             exitCaseCheckIfUserClose(
-                                "I will now begin the tour. Please follow me!",
-                                "Sorry, you are currently too close to me, may you please take a couple steps back?"
+                                context.getString(R.string.i_will_now_begin_the_tour_please_follow_me),
+                                context.getString(R.string.sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back)
                             )
                         }
 
@@ -878,52 +903,52 @@ class MainViewModel @Inject constructor(
 
                         goTo(
                             "r410 front door",
-                            "Our first stop is room R410. I would like to welcome you to NYP. In particular, our engineering department. In this tour I will show you a couple of the facilities that we have to help our students pursue their goals and dreams."
+                            context.getString(R.string.our_first_stop_is_room_r410_i_would_like_to_welcome_you_to_nyp_in_particular_our_engineering_department_in_this_tour_i_will_show_you_a_couple_of_the_facilities_that_we_have_to_help_our_students_pursue_their_goals_and_dreams)
                         )
 
                         goToSpeed(SpeedLevel.HIGH)
 
-                        speak("I have made it to the r410 front door location")
+                        speak(context.getString(R.string.i_have_made_it_to_the_r410_front_door_location))
 
                         while (true) {
                             if (yPosition != YDirection.MISSING) {
                                 if (yPosition == YDirection.CLOSE) {
-                                    speak("Sorry, you are a bit too close for my liking, could you take a couple steps back?")
+                                    speak(context.getString(R.string.sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back))
                                     conditionTimer({ yPosition != YDirection.CLOSE }, time = 5)
 
                                     if (yPosition != YDirection.CLOSE) {
-                                        speak("Thank you")
+                                        speak(context.getString(R.string.thank_you))
                                     }
 
                                 } else {
-                                    speak("Welcome to block R level 4. Before we begin I would like to explain a couple of my capabilities.")
+                                    speak(context.getString(R.string.welcome_to_block_r_level_4_before_we_begin_i_would_like_to_explain_a_couple_of_my_capabilities))
                                     break
                                 }
                             } else {
-                                speak("Please Stand in front of me and I will begin the tour.")
+                                speak(context.getString(R.string.please_stand_in_front_of_me_and_i_will_begin_the_tour))
                                 conditionTimer({ yPosition != YDirection.MISSING }, time = 2)
 
                                 if (yPosition == YDirection.MISSING) {
                                     turnBy(180)
-                                    speak("Sorry, I need you to stand in front of me to begin the tour.")
+                                    speak(context.getString(R.string.sorry_i_need_you_to_stand_in_front_of_me_to_begin_the_tour))
                                     turnBy(180)
 
                                     conditionTimer({ yPosition != YDirection.MISSING }, time = 5)
                                 }
                                 if (yPosition != YDirection.MISSING) {
-                                    speak("Thank You")
+                                    speak(context.getString(R.string.thank_you))
                                 }
                             }
                             buffer()
                         }
 
                         getUseConfirmation(
-                            "If you are ready for me to continue please say Yes. Otherwise, say no and I will wait.",
-                            "Ok, I will wait a little bit.",
+                            context.getString(R.string.if_you_are_ready_for_me_to_continue_please_say_yes_otherwise_say_no_and_i_will_wait),
+                            context.getString(R.string.ok_i_will_wait_a_little_bit),
                             5000L,
-                            "Great, I will now begin my demonstration",
-                            "Sorry, I did not understand what you said. Could you repeat yourself.",
-                            "Sorry, I must ask you to come back."
+                            context.getString(R.string.great_i_will_now_begin_my_demonstration),
+                            context.getString(R.string.sorry_i_did_not_understand_what_you_said_could_you_repeat_yourself),
+                            context.getString(R.string.sorry_i_must_ask_you_to_come_back)
                         )
 
                         stateFinished()
@@ -931,7 +956,7 @@ class MainViewModel @Inject constructor(
 
                     TourState.STAGE_1_B -> {
 
-                        speak(" As I go up this ramp, please don’t assist me. I may struggle a bit because of the black lines on the ramp. I rely on infrared sensors to detect sudden drops on the ground to avoid falling, but black absorbs infrared light more than other colors. This means the intensity of infrared light I receive back is lower then it otherwise would be. This can make it seem to me like there’s a drop, which is why I have difficulty here. But don’t worry, I’m big and strong enough to handle it on my own!", setConditionGate = false)
+                        speak(context.getString(R.string.as_i_go_up_this_ramp_please_don_t_assist_me_i_may_struggle_a_bit_because_of_the_black_lines_on_the_ramp_i_rely_on_infrared_sensors_to_detect_sudden_drops_on_the_ground_to_avoid_falling_but_black_absorbs_infrared_light_more_than_other_colors_this_means_the_intensity_of_infrared_light_i_receive_back_is_lower_then_it_otherwise_would_be_this_can_make_it_seem_to_me_like_there_s_a_drop_which_is_why_i_have_difficulty_here_but_don_t_worry_i_m_big_and_strong_enough_to_handle_it_on_my_own), setConditionGate = false)
 
                         goTo("before ramp")
                         skidJoy(1.0F, 0.0F, 8)
@@ -941,11 +966,11 @@ class MainViewModel @Inject constructor(
 
                         goTo(
                             "r410 back door",
-                            "Now that we have that covered, our first stop is room R410. Welcome to NYP, specifically to our engineering department! On this tour, I’ll be showing you some of the facilities we have that support our students in pursuing their goals and dreams.\"",
+                            context.getString(R.string.now_that_we_have_that_covered_our_first_stop_is_room_r410_welcome_to_nyp_specifically_to_our_engineering_department_on_this_tour_i_ll_be_showing_you_some_of_the_facilities_we_have_that_support_our_students_in_pursuing_their_goals_and_dreams),
                             true
                         )
 
-                        speak("I have made it to the r410 back door location")
+                        speak(context.getString(R.string.i_have_made_it_to_the_r410_back_door_location))
 
                         stateFinished()
                     }
@@ -1020,22 +1045,22 @@ class MainViewModel @Inject constructor(
                         }
                          */
 
-                        speak("My first capability, one that you might have noted, is my ability to detect how close someone is in front of me. For this example, I want everyone to be far away from me")
+                        speak(context.getString(R.string.my_first_capability_one_that_you_might_have_noted_is_my_ability_to_detect_how_close_someone_is_in_front_of_me_for_this_example_i_want_everyone_to_be_far_away_from_me))
 
 //                        // Get everyone to move far away from temi
                         while (true) {
                             if (yPosition == YDirection.FAR) {
-                                speak("Great, this distance is what I consider you to be far away from me. Can I have one person move a little bit closer?")
+                                speak(context.getString(R.string.great_this_distance_is_what_i_consider_you_to_be_far_away_from_me_can_i_have_one_person_move_a_little_bit_closer))
                                 break
                             } else {
-                                speak("Sorry, Could you step back a bit more.")
+                                speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
                                 conditionTimer(
                                     { yPosition == YDirection.FAR || yPosition == YDirection.MISSING },
                                     time = 4
                                 )
 
                                 if (yPosition == YDirection.FAR || yPosition == YDirection.MISSING) {
-                                    speak("Thank you")
+                                    speak(context.getString(R.string.thank_you))
                                 }
                             }
                             buffer()
@@ -1046,21 +1071,21 @@ class MainViewModel @Inject constructor(
                         while (true) {
                             when (yPosition) {
                                 YDirection.MIDRANGE -> {
-                                    speak("Perfect, this distance is my Midrange. Please stay at least this distance to allow me to navigate easily.")
+                                    speak(context.getString(R.string.perfect_this_distance_is_my_midrange_please_stay_at_least_this_distance_to_allow_me_to_navigate_easily))
                                     break
                                 }
 
                                 YDirection.CLOSE -> {
-                                    speak("Sorry, could you step back a bit more.")
+                                    speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
                                     conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 4)
                                 }
 
                                 YDirection.FAR, YDirection.MISSING -> {
-                                    speak("Sorry, could you come a bit closer.")
+                                    speak(context.getString(R.string.sorry_could_you_come_a_bit_closer))
                                     conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 4)
                                 }
                             }
-                            if (yPosition == YDirection.MIDRANGE) speak("Thank you")
+                            if (yPosition == YDirection.MIDRANGE) speak(context.getString(R.string.thank_you))
                             buffer()
                         }
 
@@ -1137,19 +1162,19 @@ class MainViewModel @Inject constructor(
                         }
                          */
 
-                        speak("My first capability, one that you might have noted, is my ability to detect how close someone is in front of me. For this example, I want everyone to be far away from me")
+                        speak(context.getString(R.string.my_first_capability_one_that_you_might_have_noted_is_my_ability_to_detect_how_close_someone_is_in_front_of_me_for_this_example_i_want_everyone_to_be_far_away_from_me))
 
 //                        // Get everyone to move far away from temi
                         while (true) {
                             if (yPosition == YDirection.FAR || yPosition == YDirection.MISSING) {
-                                speak("Great, this distance is what I consider you to be far away from me. Can I have one person move a little bit closer? Try and position yourself to be about a meter away from me.")
+                                speak(context.getString(R.string.great_this_distance_is_what_i_consider_you_to_be_far_away_from_me_can_i_have_one_person_move_a_little_bit_closer_try_and_position_yourself_to_be_about_a_meter_away_from_me))
                                 break
                             } else {
-                                speak("Sorry, Could you step back a bit more.")
+                                speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
                                 conditionTimer({ yPosition == YDirection.FAR }, time = 1)
 
                                 if (yPosition == YDirection.FAR) {
-                                    speak("Thank you")
+                                    speak(context.getString(R.string.thank_you))
                                 }
                             }
                             buffer()
@@ -1160,21 +1185,21 @@ class MainViewModel @Inject constructor(
                         while (true) {
                             when (yPosition) {
                                 YDirection.MIDRANGE -> {
-                                    speak("Perfect, this distance is my Midrange. Please stay at least this distance to allow me to navigate easily.")
+                                    speak(context.getString(R.string.perfect_this_distance_is_my_midrange_please_stay_at_least_this_distance_to_allow_me_to_navigate_easily))
                                     break
                                 }
 
                                 YDirection.CLOSE -> {
-                                    speak("Sorry, could you step back a bit more.")
+                                    speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
                                     conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 1)
                                 }
 
                                 YDirection.FAR, YDirection.MISSING -> {
-                                    speak("Sorry, could you come a bit closer.")
+                                    speak(context.getString(R.string.sorry_could_you_come_a_bit_closer))
                                     conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 1)
                                 }
                             }
-                            if (yPosition == YDirection.MIDRANGE) speak("Thank you")
+                            if (yPosition == YDirection.MIDRANGE) speak(context.getString(R.string.thank_you))
                             buffer()
                         }
 
@@ -1203,7 +1228,7 @@ class MainViewModel @Inject constructor(
                                 "r417" -> {
                                     delay(1000)
                                     script =
-                                        "The lab in front of you is the Electrical Machines & Drives Lab. Electrical machines are found everywhere in our daily lives, either serving us directly or assisting us in performing various tasks. Here, you will learn the latest knowledge and skills related to machines and drives, and perform simulations using industry-standard software and technologies, such as those from FESTO. As a result, learners will gain a strong understanding of the different drives and machines suitable for various applications."
+                                        context.getString(R.string.the_lab_in_front_of_you_is_the_electrical_machines_drives_lab_electrical_machines_are_found_everywhere_in_our_daily_lives_either_serving_us_directly_or_assisting_us_in_performing_various_tasks_here_you_will_learn_the_latest_knowledge_and_skills_related_to_machines_and_drives_and_perform_simulations_using_industry_standard_software_and_technologies_such_as_those_from_festo_as_a_result_learners_will_gain_a_strong_understanding_of_the_different_drives_and_machines_suitable_for_various_applications)
                                     // goTo(location)
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r417
@@ -1216,7 +1241,7 @@ class MainViewModel @Inject constructor(
                                 "r416" -> {
                                     delay(1000)
                                     script =
-                                        "In front of you is the Mechatronics Systems Integration Lab. In this lab, students will acquire the skills needed to program microcontrollers to control peripherals. A microcontroller is a small computer built into a metal-oxide-semiconductor integrated circuit. It is the heart of many automatically controlled products and devices, such as implantable medical devices, smart devices, sensors, and more. With the advancement of technology, microcontrollers have become an integral part of connecting our physical environment to the digital world, thereby improving our lives."
+                                        context.getString(R.string.in_front_of_you_is_the_mechatronics_systems_integration_lab_in_this_lab_students_will_acquire_the_skills_needed_to_program_microcontrollers_to_control_peripherals_a_microcontroller_is_a_small_computer_built_into_a_metal_oxide_semiconductor_integrated_circuit_it_is_the_heart_of_many_automatically_controlled_products_and_devices_such_as_implantable_medical_devices_smart_devices_sensors_and_more_with_the_advancement_of_technology_microcontrollers_have_become_an_integral_part_of_connecting_our_physical_environment_to_the_digital_world_thereby_improving_our_lives)
                                     goTo(location, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r416
@@ -1228,13 +1253,13 @@ class MainViewModel @Inject constructor(
                                 "trophy cabinet 1" -> {
                                     delay(1000)
                                     script =
-                                        "Our next stop is the NYP trophy cabinet. First and foremost on display are the many trophies we have won as champions in various robot categories at the annual Singapore Robotics Games. Different robots, such as legged robots and snakes, were designed, built, and developed in-house to participate in sprints, long-distance races, and even entertainment challenges."
+                                        context.getString(R.string.our_next_stop_is_the_nyp_trophy_cabinet_first_and_foremost_on_display_are_the_many_trophies_we_have_won_as_champions_in_various_robot_categories_at_the_annual_singapore_robotics_games_different_robots_such_as_legged_robots_and_snakes_were_designed_built_and_developed_in_house_to_participate_in_sprints_long_distance_races_and_even_entertainment_challenges)
                                     goTo(location, speak = script, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
                                 }
 
                                 "award exit" -> {
                                     script =
-                                        "Our students have not only used their creativity in competitions but also in developing products to solve real-world problems and address industry needs. On display, you can see examples of products jointly developed by both students and staff during the students' final-year projects. Over a 3-month period, students are tasked with designing and implementing solutions. Some of these outputs are directly translated into industry projects, which have been in collaboration with SEG since NYP's founding in 1993."
+                                        context.getString(R.string.our_students_have_not_only_used_their_creativity_in_competitions_but_also_in_developing_products_to_solve_real_world_problems_and_address_industry_needs_on_display_you_can_see_examples_of_products_jointly_developed_by_both_students_and_staff_during_the_students_final_year_projects_over_a_3_month_period_students_are_tasked_with_designing_and_implementing_solutions_some_of_these_outputs_are_directly_translated_into_industry_projects_which_have_been_in_collaboration_with_seg_since_nyp_s_founding_in_1993)
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.trophy
                                     goTo(location, speak = script, haveFace = false, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
@@ -1244,9 +1269,9 @@ class MainViewModel @Inject constructor(
 
                                 "r405" -> {
                                     script =
-                                        "In front of you is the Robotic Automation & Control Lab. In this lab, students will acquire skills to program robots for various applications, such as handling, picking, and palletizing. These robots are commonly found in factories to automate simple and repetitive tasks that would otherwise require dedicated resources. However, with advancements in technology, robots have expanded their presence from manufacturing industries to other sectors such as clinical laboratories, agriculture, food and beverage, and education, where they work collaboratively with humans. \n" +
-                                                "In addition to programming robots, machine vision plays an important role in robotic systems, enabling intelligent decision-making for complex tasks. Students will learn to perform identification and inspection using industrial-grade vision systems. \n" +
-                                                "With these skill sets, students can pursue careers as Robotics Engineers, Quality Control Engineers, or System Engineers, where robotic systems and vision technologies are deployed in various applications."
+                                        context.getString(R.string.in_front_of_you_is_the_robotic_automation_control_lab_in_this_lab_students_will_acquire_skills_to_program_robots_for_various_applications_such_as_handling_picking_and_palletizing_these_robots_are_commonly_found_in_factories_to_automate_simple_and_repetitive_tasks_that_would_otherwise_require_dedicated_resources_however_with_advancements_in_technology_robots_have_expanded_their_presence_from_manufacturing_industries_to_other_sectors_such_as_clinical_laboratories_agriculture_food_and_beverage_and_education_where_they_work_collaboratively_with_humans) +
+                                                context.getString(R.string.in_addition_to_programming_robots_machine_vision_plays_an_important_role_in_robotic_systems_enabling_intelligent_decision_making_for_complex_tasks_students_will_learn_to_perform_identification_and_inspection_using_industrial_grade_vision_systems) +
+                                                context.getString(R.string.with_these_skill_sets_students_can_pursue_careers_as_robotics_engineers_quality_control_engineers_or_system_engineers_where_robotic_systems_and_vision_technologies_are_deployed_in_various_applications)
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r405
                                     goTo(location, speak = script, haveFace = false, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
@@ -1256,7 +1281,7 @@ class MainViewModel @Inject constructor(
 
                                 "r412" -> {
                                     script =
-                                        "Too your left is the Siemens Control Lab, where our learners gain knowledge in areas such as pneumatics, sensors, and Programmable Logic Controllers (also known as PLCs). Here, actions like 'pick and place' are practiced and applied hands-on using industry-standard equipment from Siemens. This provides our students with first-hand experience with the technologies and skills the industry is seeking."
+                                        context.getString(R.string.too_your_left_is_the_siemens_control_lab_where_our_learners_gain_knowledge_in_areas_such_as_pneumatics_sensors_and_programmable_logic_controllers_also_known_as_plcs_here_actions_like_pick_and_place_are_practiced_and_applied_hands_on_using_industry_standard_equipment_from_siemens_this_provides_our_students_with_first_hand_experience_with_the_technologies_and_skills_the_industry_is_seeking)
                                     goTo(location, backwards = backwards, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r412
@@ -1277,21 +1302,30 @@ class MainViewModel @Inject constructor(
                     }
 
                     TourState.TOUR_END -> {
-                        speak("Thank you for taking my tour, it was great being able to meet you all.")
+                        speak(context.getString(R.string.thank_you_for_taking_my_tour_it_was_great_being_able_to_meet_you_all))
                         if (userName != null) {
                             speak("Especially you $userName")
                         }
-                        speak("I look forward to meeting you all next time.")
+                        speak(context.getString(R.string.i_look_forward_to_meeting_you_all_next_time))
 
                         goTo("r410 front door")
 
+//                        val goodbyePhrases = listOf(
+//                            "Thank you for joining me today!",
+//                            "I hope you had a wonderful time!",
+//                            "It was a pleasure showing you around!",
+//                            "Safe travels and goodbye!",
+//                            "I can't wait to see you again!",
+//                            "Take care and have a fantastic day!"
+//                        )
+
                         val goodbyePhrases = listOf(
-                            "Thank you for joining me today!",
-                            "I hope you had a wonderful time!",
-                            "It was a pleasure showing you around!",
-                            "Safe travels and goodbye!",
-                            "I can't wait to see you again!",
-                            "Take care and have a fantastic day!"
+                            "感谢今天的陪伴！",  // "Thank you for joining me today!"
+                            "希望你度过了一段愉快的时光！",  // "I hope you had a wonderful time!"
+                            "很高兴为你介绍！",  // "It was a pleasure showing you around!"
+                            "祝你一路顺风，再见！",  // "Safe travels and goodbye!"
+                            "迫不及待想再见到你！",  // "I can't wait to see you again!"
+                            "保重，祝你有个美好的一天！"  // "Take care and have a fantastic day!"
                         )
 
                         // While loop to monitor the follow state and express excitement
@@ -1309,7 +1343,7 @@ class MainViewModel @Inject constructor(
 
                         goTo("home base")
 
-                        speak("I am ready for the next tour")
+                        speak(context.getString(R.string.i_am_ready_for_the_next_tour))
 
                         stateFinished()
                     }
@@ -1350,66 +1384,15 @@ class MainViewModel @Inject constructor(
 //                        // speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
 //                        goTo("test point 2", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
 
-                        shouldExit = false
-                        var response: String? = null
-                        while(true) {
-                            speak("I will start listening")
-                            listen()
-                            if (userResponse != null && userResponse != " " ) {
-                                response = userResponse
-                                speak("Did you say $userResponse. Please just say yes or no.")
-                                while(true) {
-                                    listen()
-                                    if(userResponse != null && userResponse != " " ) {
-                                        when { // Condition gate based on what the user says
-                                            containsPhraseInOrder(userResponse, reject, true) -> {
-                                                speak("Sorry, lets try this again")
-                                                break
-                                            }
-
-                                            containsPhraseInOrder(userResponse, confirmation, true) -> {
-                                                speak("Great, let me think for a moment")
-                                                shouldExit = true
-                                                break
-                                            }
-
-                                            else -> {
-                                                    speak("Sorry, I did not understand you.")
-                                            }
-                                        }
-                                    }
-                                    buffer()
-                                }
-                                if(shouldExit) break
-                            } else {
-                                speak("Sorry I had an Issue with hearing you.")
-                            }
-                            buffer()
-                        }
-
-//                        speak("Give me a moment, I am thinking.")
-                        Log.i("DEBUG!", response.toString())
-                        response?.let { sendMessage(openAI, it) }
-
-                        playWaitMusic = true
-                        updateGifResource(R.drawable.thinking)
-
-                        conditionGate({responseGPT == null})
-                        Log.i("DEBUG!", responseGPT.toString())
-//
-                        delay(60000)
-                        playWaitMusic = false
-                        updateGifResource(R.drawable.idle)
-
-                        speak(responseGPT.toString())
-                        responseGPT = null
-
 //                        while(true) { buffer() }
+//                        speak("李老师您好，您能理解吗？")
+//                        listen()
+//                        speak("You are speaking ${language.value}")
                     }
 
                     TourState.GET_USER_NAME -> {
                         // Stuff below gets userName
-                        speak("While you are there, do you mind if I ask for your name?")
+                        speak(context.getString(R.string.while_you_are_there_do_you_mind_if_i_ask_for_your_name))
 
                         var attempts = 0
                         userName = null
@@ -1424,14 +1407,18 @@ class MainViewModel @Inject constructor(
                                 userName = extractName(userResponse!!)
                                 if (userName != null) {
                                     var gotName = false
-                                    speak("I think your name is $userName, is that correct?")
+                                    speak(
+                                        context.getString(
+                                            R.string.i_think_your_name_is_is_that_correct,
+                                            userName
+                                        ))
 
                                     while (true) {
                                         listen()
 
                                         when { // Confirmation gate based on user input
                                             containsPhraseInOrder(userResponse, reject, true) -> {
-                                                speak("Okay, let’s try again.")
+                                                speak(context.getString(R.string.okay_let_s_try_again))
                                                 break
                                             }
 
@@ -1440,13 +1427,13 @@ class MainViewModel @Inject constructor(
                                                 confirmation,
                                                 true
                                             ) -> {
-                                                speak("Great!")
+                                                speak(context.getString(R.string.great))
                                                 gotName = true
                                                 break
                                             }
 
                                             else -> {
-                                                speak("Sorry, I did not hear you clearly. Could you confirm your name?")
+                                                speak(context.getString(R.string.sorry_i_did_not_hear_you_clearly_could_you_confirm_your_name))
                                             }
                                         }
 
@@ -1458,22 +1445,86 @@ class MainViewModel @Inject constructor(
                                     }
 
                                 } else {
-                                    speak("Sorry, I didn’t catch your name. Try using a phrase like, 'my name is...'")
+                                    speak(context.getString(R.string.sorry_i_didn_t_catch_your_name_try_using_a_phrase_like_my_name_is))
                                 }
                             } else {
-                                speak("Sorry, I didn’t hear you. Could you repeat yourself?")
+                                speak(context.getString(R.string.sorry_i_didn_t_hear_you_could_you_repeat_yourself))
                             }
                             attempts++
                             buffer()  // Slight pause before the next attempt
                         }
 
                         if (userName == null) {
-                            speak("It seems I couldn't get your name. Feel free to introduce yourself again later.")
+                            speak(context.getString(R.string.it_seems_i_couldn_t_get_your_name_feel_free_to_introduce_yourself_again_later))
                         } else {
-                            speak("Hi there, $userName. My name is Temi. It's nice to meet you.")
+                            speak(
+                                context.getString(
+                                    R.string.hi_there_my_name_is_temi_it_s_nice_to_meet_you,
+                                    userName
+                                ))
                         }
 
                         stateFinished()
+                    }
+
+                    TourState.CHATGPT -> {
+                        shouldExit = false
+                        var response: String? = null
+                        while(true) {
+                            speak(context.getString(R.string.i_will_start_listening))
+                            listen()
+                            if (userResponse != null && userResponse != " " ) {
+                                response = userResponse
+                                speak(
+                                    context.getString(
+                                        R.string.did_you_say_please_just_say_yes_or_no,
+                                        userResponse
+                                    ))
+                                while(true) {
+                                    listen()
+                                    if(userResponse != null && userResponse != " " ) {
+                                        when { // Condition gate based on what the user says
+                                            containsPhraseInOrder(userResponse, reject, true) -> {
+                                                speak(context.getString(R.string.sorry_lets_try_this_again))
+                                                break
+                                            }
+
+                                            containsPhraseInOrder(userResponse, confirmation, true) -> {
+                                                speak(context.getString(R.string.great_let_me_think_for_a_moment))
+                                                shouldExit = true
+                                                break
+                                            }
+
+                                            else -> {
+                                                speak(context.getString(R.string.sorry_i_did_not_understand_you))
+                                            }
+                                        }
+                                    }
+                                    buffer()
+                                }
+                                if(shouldExit) break
+                            } else {
+                                speak(context.getString(R.string.sorry_i_had_an_issue_with_hearing_you))
+                            }
+                            buffer()
+                        }
+
+//                        speak("Give me a moment, I am thinking.")
+                        Log.i("DEBUG!", response.toString())
+                        response?.let { sendMessage(openAI, it) }
+
+                        playWaitMusic = true
+                        updateGifResource(R.drawable.thinking)
+
+                        conditionGate({responseGPT == null})
+                        Log.i("DEBUG!", responseGPT.toString())
+//
+                        delay(10000)
+                        playWaitMusic = false
+                        updateGifResource(R.drawable.idle)
+
+                        speak(responseGPT.toString())
+                        responseGPT = null
                     }
 
                     TourState.TEMI_V2 -> {
