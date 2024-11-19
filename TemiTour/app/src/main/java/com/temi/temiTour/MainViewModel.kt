@@ -742,13 +742,25 @@ class MainViewModel @Inject constructor(
 //                     Log.i("DEBUG!", "In misuse state: ${isMisuseState()}")
                      Log.i("DEBUG!", "Current Language: ${language.value}")
                     if ((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] == true)) {
-                        conditionTimer({!((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true)}, interruptTriggerDelay)
+
+                        conditionTimer({!((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true)}, interruptTriggerDelay/2)
                         if ((yPosition != YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition != YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] != true)) continue
+                        Log.i("DEBUG!", "Interrupt 1")
+                        triggeredInterrupt = true
+                        stopMovement()
+                        buffer()
+                        tiltAngle(20)
+
+                        conditionTimer({!((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true)}, interruptTriggerDelay/2)
+                        if ((yPosition != YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition != YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] != true)) continue
+                        Log.i("DEBUG!", "Interrupt 2")
                         triggeredInterrupt = true
                         repeatSpeechFlag = true
                         repeatGoToFlag = true
                         // Log.i("DEBUG!", "Trigger Stopped")
                         stopMovement()
+                        buffer()
+                        tiltAngle(20)
                     } else {
 //                        Log.i("DEBUG!", "Trigger Stopped")
                         triggeredInterrupt = false
@@ -782,16 +794,16 @@ class MainViewModel @Inject constructor(
                 while (true) { // This will loop the states
 //                    Log.i("DEBUG!", "In start location")
 
-//                    tourState(TourState.TESTING)
+                    tourState(TourState.TESTING)
 //                    tourState(TourState.CHATGPT)
-
-                    tourState(TourState.START_LOCATION)
-                    tourState(TourState.ALTERNATE_START)
-                    tourState(TourState.STAGE_1_B)
-                    tourState(TourState.STAGE_1_1_B)
-                    tourState(TourState.GET_USER_NAME)
-                    tourState(TourState.STAGE_1_2_B)
-                    tourState(TourState.TOUR_END)
+//
+//                    tourState(TourState.START_LOCATION)
+//                    tourState(TourState.ALTERNATE_START)
+//                    tourState(TourState.STAGE_1_B)
+//                    tourState(TourState.STAGE_1_1_B)
+//                    tourState(TourState.GET_USER_NAME)
+//                    tourState(TourState.STAGE_1_2_B)
+//                    tourState(TourState.TOUR_END)
 
 //                    tourState(TourState.IDLE)
 //                    tourState(TourState.STAGE_1)
@@ -860,7 +872,7 @@ class MainViewModel @Inject constructor(
 
                         setMainButtonMode(false)
                         goTo(
-                            context.getString(R.string.greet_tour),
+                            "greet tour",
                             context.getString(R.string.hi_every_one_my_name_is_temi_and_i_will_be_the_one_conducting_this_tour_and_showing_you_our_engineering_department_i_am_very_excited_to_meet_you_all_today)
                         )
 
@@ -1379,10 +1391,12 @@ class MainViewModel @Inject constructor(
 //                        goToSpeed(SpeedLevel.SLOW)
 ////                        goTo("test point 1")
 ////                        goTo("test point 2")
+                        val speech1 = "Go to test point 1, backwards, interrupt system, interrupt if user missing, but do not interrupt if user is close, and don't interrupt if the device moves."
+                        val speech2 = "Move to test point 2, backwards, interrupt system, and only interrupt if the user is missing. Do not interrupt if the user is close, and if the device moves, don't interrupt."
 //                         speak(speak = "Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
-//                        goTo("test point 1", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor." , backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-//                        // speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-//                        goTo("test point 2", speak = "What do you do with a drunken sailor. Put him in a long boat till his sober. Way hay and up she rises. What do you do with a drunken sailor. Shave his belly with a rusty razor.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                        goTo("test point 1" , speak = speech1, backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+//                         speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
+                        goTo("test point 2", speak = speech2, backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
 
 //                        while(true) { buffer() }
 //                        speak("李老师您好，您能理解吗？")
@@ -2270,7 +2284,7 @@ class MainViewModel @Inject constructor(
     private suspend fun conditionGate(trigger: () -> Boolean, log: Boolean = false) {
         // Loop until the trigger condition returns false
         while (trigger()) {
-            if (log) Log.i("DEBUG!", "Trigger: ${trigger()}")
+//            if (log) Log.i("DEBUG!", "Trigger: ${trigger()}")
             buffer() // Pause between checks to prevent busy-waiting
         }
 //    Log.i("ConditionGate", "End")
