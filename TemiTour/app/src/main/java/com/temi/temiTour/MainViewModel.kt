@@ -1,19 +1,12 @@
 package com.temi.temiTour
 
-import android.annotation.SuppressLint
-import android.app.Application
 import android.content.Context
-import android.provider.Settings.Global.getString
 import android.util.Log
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.robotemi.sdk.TtsRequest
-import com.robotemi.sdk.constants.HardButton
 import com.robotemi.sdk.navigation.model.Position
 import com.robotemi.sdk.navigation.model.SpeedLevel
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,16 +18,13 @@ import kotlinx.coroutines.launch
 import java.util.regex.Pattern
 import javax.inject.Inject
 import kotlin.math.*
-import androidx.lifecycle.viewModelScope
 import com.aallam.openai.api.chat.ChatRole
 import com.aallam.openai.api.chat.chatCompletionRequest
 import com.aallam.openai.api.chat.chatMessage
-import com.aallam.openai.api.model.Model
 import com.aallam.openai.api.model.ModelId
 import com.aallam.openai.client.OpenAI
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
+import com.temi.temiTour.ui.theme.BluetoothManager
 
 // Track state
 enum class State {
@@ -103,7 +93,8 @@ enum class TourState {
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val robotController: RobotController,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val bluetoothManager: BluetoothManager
 ) : ViewModel() {
 
     // These collect data from services in robotController
@@ -122,6 +113,9 @@ class MainViewModel @Inject constructor(
     private val locationState = robotController.locationState
     private val beWithMeStatus = robotController.beWithMeState
 
+//    // BLUETOOTH
+//    private val bluetoothState = bluetoothManager.bluetoothState
+    // BLUETOOTH
 
     private val buffer = 100L // Used to create delay need to unsure systems work
     private var stateMode = State.NULL // Keep track of system state
@@ -174,17 +168,17 @@ class MainViewModel @Inject constructor(
     //******************************************** Stuff for the tour
     // key word lists
     private val confirmation = listOf(
-        "是", "好的", "行", "我愿意", "算我一个", "绝对没问题",
-        "当然", "现在就", "走吧", "我会到的",
-        "听起来不错", "我可以参加", "我准备好了", "就这么定了",
-        "一定", "我在路上", "我会来"
+        "Yes", "Okay", "Sure", "I'm willing", "Count me in", "Absolutely no problem",
+        "Of course", "Right now", "Let's go", "I'll be there",
+        "Sounds good", "I can join", "I'm ready", "It's settled",
+        "Definitely", "On my way", "I'll come"
     )
 
     private val reject = listOf(
-        "不", "现在不行", "不能", "不参加", "赶不上",
-        "不可能", "抱歉", "我有安排", "不去",
-        "很遗憾不能", "我做不到", "遗憾地说不",
-        "不行", "不用了", "我很忙", "我需要拒绝"
+        "No", "Not now", "Can't", "Not attending", "Can't make it",
+        "Impossible", "Sorry", "I have plans", "Not going",
+        "Unfortunately can't", "I can't do it", "Regretfully no",
+        "No way", "No thanks", "I'm busy", "I need to decline"
     )
 
     // Function to check for keywords or phrases
@@ -528,18 +522,20 @@ class MainViewModel @Inject constructor(
             val sentences = speak.split(Regex("(?<=[.!?])\\s+"))
 
 //            // change the flags as needed
-//            updateInterruptFlag("userMissing", setInterruptConditionUserMissing)
-//            updateInterruptFlag("userTooClose", setInterruptConditionUSerToClose)
-//            updateInterruptFlag("deviceMoved", setInterruptConditionDeviceMoved)
+            updateInterruptFlag("userMissing", setInterruptConditionUserMissing)
+            updateInterruptFlag("userTooClose", setInterruptConditionUSerToClose)
+            updateInterruptFlag("deviceMoved", setInterruptConditionDeviceMoved)
 
             if (setConditionGate) {
                 for (sentence in sentences) {
                     if (sentence.isNotBlank()) {
                         do {
-                            // Log.i("DEBUG!", sentence)
+                            Log.i("DEBUG!", sentence)
                             // set the repeat flag to false once used
-                            if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag = false
-                            else if (!setInterruptSystem) {
+                            if (setInterruptSystem && repeatSpeechFlag) {
+                                repeatSpeechFlag = false
+                                // Log.i ("DEGUG!", "Repeat speach")
+                            } else if (!setInterruptSystem) {
                                 repeatSpeechFlag = false
                             }
 
@@ -555,7 +551,7 @@ class MainViewModel @Inject constructor(
                             conditionGate({
                                 ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
                             })
-                        } while (repeatSpeechFlag)
+                        } while (repeatSpeechFlag && setInterruptSystem)
                     }
                 }
 
@@ -591,7 +587,7 @@ class MainViewModel @Inject constructor(
                                     conditionGate({
                                         ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
                                     })
-                                } while (repeatSpeechFlag)
+                                } while (repeatSpeechFlag && setInterruptSystem)
                             }
                         }
                         talkingInThreadFlag = false
@@ -631,7 +627,8 @@ class MainViewModel @Inject constructor(
             setInterruptConditionUserMissing,
             setInterruptConditionUSerToClose,
             setInterruptConditionDeviceMoved
-        ) // *******************************************
+        )
+        // *******************************************
 
 //        updateInterruptFlag("userMissing", setInterruptConditionUserMissing)
 //        updateInterruptFlag("userTooClose", setInterruptConditionUSerToClose)
@@ -725,7 +722,7 @@ class MainViewModel @Inject constructor(
                     chatMessage {
                         role = ChatRole.System
                         content =
-                            "You are an assistant embedded in a robot. Respond as sassy and snarky as possible to user queries. Ensure to keep responses very short so that it is not above 100 words. Ensure to respond in Mandarin (Chinese) and not english"
+                            "You are an assistant embedded in a robot. Respond as sassy and snarky as possible to user queries, but keep the ascetic like that of a robot. Ensure to keep responses very short so that it is not above 100 words."
                     },
                     chatMessage {
                         role = ChatRole.User
@@ -755,7 +752,10 @@ class MainViewModel @Inject constructor(
 
     private suspend fun listen() {
         robotController.wakeUp() // This will start the listen mode
-        conditionGate({ speechUpdatedValue == null || speechUpdatedValue == " " }) // Wait until listen mode completed
+        Log.i("GPT!", "Before Gate: ${conversationAttached.value.isAttached}")
+        buffer()
+        conditionGate({ conversationAttached.value.isAttached }) // Wait until listen mode completed
+        Log.i("GPT!", "After Gate")
 
         // Make sure the speech value is updated before using it
         userResponse =
@@ -771,9 +771,11 @@ class MainViewModel @Inject constructor(
         while (true) {
             speak(context.getString(R.string.does_anyone_have_a_question))
 
+            Log.i("GPT!", "Before listen")
             listen()
+            Log.i("GPT!", "Before validation: $userResponse")
 
-            if (userResponse != null && userResponse != " ") {
+            if (userResponse != null && userResponse != " " && userResponse != "") {
                 response = userResponse
                 buffer()
                 if (containsPhraseInOrder(response, reject, true)) {
@@ -811,13 +813,22 @@ class MainViewModel @Inject constructor(
                 }
                 if (shouldExit) break
             } else {
-                speak(context.getString(R.string.sorry_i_had_an_issue_with_hearing_you))
+                Log.i("GPT!", "In else state")
+                if (userResponse != " ") {
+                    speak(context.getString(R.string.all_good_i_will_continue_on))
+                    noQuestion = true
+                    break
+                } else {
+                    speak(context.getString(R.string.sorry_i_had_an_issue_with_hearing_you))
+                }
             }
             buffer()
         }
 
+        Log.i("GPT!", "Passed Question asking")
+
         if (!noQuestion) {
-            Log.i("DEBUG!", response.toString())
+            Log.i("GPT!", response.toString())
             response?.let { sendMessage(openAI, it) }
 
             playWaitMusic = true
@@ -825,7 +836,7 @@ class MainViewModel @Inject constructor(
             updateGifResource(R.drawable.thinking)
 
             conditionGate({ responseGPT == null })
-            Log.i("DEBUG!", responseGPT.toString())
+            Log.i("GPT!", responseGPT.toString())
 //
             delay(15000)
             playWaitMusic = false
@@ -844,9 +855,8 @@ class MainViewModel @Inject constructor(
             launch {
                 while (true) {
 //                     Log.i("DEBUG!", "In misuse state: ${isMisuseState()}")
-                    Log.i("DEBUG!", "Current Language: ${language.value}")
+                    // Log.i("DEBUG!", "Current Language: ${language.value}")
                     if ((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || ((isMisuseState()) && interruptFlags["deviceMoved"] == true)) {
-
                         conditionTimer(
                             { !((yPosition == YDirection.MISSING && interruptFlags["userMissing"] == true) || (yPosition == YDirection.CLOSE && interruptFlags["userTooClose"] == true) || (isMisuseState()) && interruptFlags["deviceMoved"] == true) },
                             interruptTriggerDelay
@@ -904,22 +914,37 @@ class MainViewModel @Inject constructor(
                 while (true) { // This will loop the states
 //                    Log.i("DEBUG!", "In start location")
 
-//                    tourState(TourState.TESTING)
+                    if (true) {
+//                        tourState(TourState.TESTING)
+//                        tourState(TourState.START_LOCATION)
+//                        tourState(TourState.ALTERNATE_START)
+//                        tourState(TourState.STAGE_1_B)
+//                        tourState(TourState.STAGE_1_1_B)
+//                        tourState(TourState.GET_USER_NAME)
+                        tourState(TourState.STAGE_1_2_B)
+                        tourState(TourState.TOUR_END)
+
+                    } else {
+                        tourState(TourState.TEMI_V2)
+                    }
+                    /*
+                //                    tourState(TourState.TESTING)
 //                    tourState(TourState.CHATGPT)
 //
-                    tourState(TourState.START_LOCATION)
-                    tourState(TourState.ALTERNATE_START)
-                    tourState(TourState.STAGE_1_B)
-                    tourState(TourState.STAGE_1_1_B)
-                    tourState(TourState.GET_USER_NAME)
-                    tourState(TourState.STAGE_1_2_B)
-                    tourState(TourState.TOUR_END)
+//                    tourState(TourState.START_LOCATION)
+//                    tourState(TourState.ALTERNATE_START)
+//                    tourState(TourState.STAGE_1_B)
+//                    tourState(TourState.STAGE_1_1_B)
+//                    tourState(TourState.GET_USER_NAME)
+//                    tourState(TourState.STAGE_1_2_B)
+//                    tourState(TourState.TOUR_END)
 
 //                    tourState(TourState.IDLE)
 //                    tourState(TourState.STAGE_1)
 //                    tourState(TourState.STAGE_1_1)
 //                    tourState(TourState.GET_USER_NAME)
 //                    tourState(TourState.TOUR_END)
+                     */
                 }
             }
 
@@ -1344,13 +1369,14 @@ class MainViewModel @Inject constructor(
 
                     TourState.STAGE_1_2_B -> {
                         val locations = listOf(
-                            Pair("r417", true),
-                            Pair("r416", true),
-                            Pair("trophy cabinet 1", true),
-                            Pair("award exit", true),
-                            Pair("r405", true),
+//                            Pair("r417", true),
+//                            Pair("r416", true),
+//                            Pair("trophy cabinet 1", true),
+//                            Pair("award exit", true),
+//                            Pair("r405", true),
                             Pair("r412", true),
                             Pair("r407", true),
+                            Pair("engage", true),
                             Pair("r410 poster spot", true)
                         )
 
@@ -1465,37 +1491,75 @@ class MainViewModel @Inject constructor(
                                     askQuestion()
                                 }
 
+                                // Bellow two need interrupts put into it again.
                                 "r412" -> {
                                     script =
                                         context.getString(R.string.too_your_left_is_the_siemens_control_lab_where_our_learners_gain_knowledge_in_areas_such_as_pneumatics_sensors_and_programmable_logic_controllers_also_known_as_plcs_here_actions_like_pick_and_place_are_practiced_and_applied_hands_on_using_industry_standard_equipment_from_siemens_this_provides_our_students_with_first_hand_experience_with_the_technologies_and_skills_the_industry_is_seeking)
-                                    goTo(
-                                        location,
-                                        backwards = backwards,
-                                        setInterruptSystem = true,
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
+
+
+
+//                                    goTo(
+//                                        location,
+//                                        backwards = backwards,
+//                                        setInterruptSystem = false, // switch this back
+//                                        setInterruptConditionUserMissing = false,
+//                                        setInterruptConditionUSerToClose = false,
+//                                        setInterruptConditionDeviceMoved = false
+//                                    )
+
+                                    launch {
+                                        // delay(5000)
+                                        bluetoothManager.startBluetoothClient(context)
+                                    }
+
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r412
                                     speak(
-                                        script,
+                                        "boo",
                                         haveFace = false,
-                                        setInterruptSystem = true,
-                                        setInterruptConditionUserMissing = true,
+                                        setInterruptSystem = false, // switch this back
+                                        setInterruptConditionUserMissing = false,
                                         setInterruptConditionUSerToClose = false,
                                         setInterruptConditionDeviceMoved = false
                                     )
-                                    buffer()
+
                                     _shouldPlayGif.value = true
                                     askQuestion()
+
+                                }
+
+                                "engage" -> {
+
+                                    goTo("engage", backwards = true)
+
+                                    speak("Hello, Temi V2.")
+
+                                    bluetoothManager.changeBlueState(false)
+
+                                    speak("How can I help you?")
+
+                                    // if you wait for a true, then set it to null once done with it
+                                    conditionGate({ bluetoothManager.gate != true })
+                                    bluetoothManager.changeBlueState(null)
+
+                                    speak("You were sleeping so peacefully. I didn't want to wake you.")
+
+                                    bluetoothManager.changeBlueState(false)
+
+                                    conditionGate({ bluetoothManager.gate != true })
+                                    bluetoothManager.changeBlueState(null)
+
+                                    speak("Alright, I'll remember for next time. But please don't do this now, I'm giving a tour, and they're right behind me.")
+
+                                    bluetoothManager.changeBlueState(false)
+
                                 }
 
                                 "r410 poster spot" -> {
                                     goTo(
                                         location,
                                         backwards = backwards,
-                                        setInterruptSystem = true,
+                                        setInterruptSystem = false, // switch this back
                                         setInterruptConditionUserMissing = true,
                                         setInterruptConditionUSerToClose = false,
                                         setInterruptConditionDeviceMoved = false
@@ -1518,22 +1582,13 @@ class MainViewModel @Inject constructor(
 
                         goTo("r410 front door")
 
-//                        val goodbyePhrases = listOf(
-//                            "Thank you for joining me today!",
-//                            "I hope you had a wonderful time!",
-//                            "It was a pleasure showing you around!",
-//                            "Safe travels and goodbye!",
-//                            "I can't wait to see you again!",
-//                            "Take care and have a fantastic day!"
-//                        )
-
                         val goodbyePhrases = listOf(
-                            "感谢今天的陪伴！",  // "Thank you for joining me today!"
-                            "希望你度过了一段愉快的时光！",  // "I hope you had a wonderful time!"
-                            "很高兴为你介绍！",  // "It was a pleasure showing you around!"
-                            "祝你一路顺风，再见！",  // "Safe travels and goodbye!"
-                            "迫不及待想再见到你！",  // "I can't wait to see you again!"
-                            "保重，祝你有个美好的一天！"  // "Take care and have a fantastic day!"
+                            "Thank you for joining me today!",
+                            "I hope you had a wonderful time!",
+                            "It was a pleasure showing you around!",
+                            "Safe travels and goodbye!",
+                            "I can't wait to see you again!",
+                            "Take care and have a fantastic day!"
                         )
 
                         // While loop to monitor the follow state and express excitement
@@ -1583,21 +1638,88 @@ class MainViewModel @Inject constructor(
                     }
 
                     TourState.TESTING -> {
-////                        speak("My name is temi. How are you. Are you doing good. Wow, that sounds great.", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionDeviceMoved = true, setInterruptConditionUSerToClose = true)
-//                        goToSpeed(SpeedLevel.SLOW)
-////                        goTo("test point 1")
-////                        goTo("test point 2")
-//                        val speech1 = "Go to test point 1, backwards, interrupt system, interrupt if user missing, but do not interrupt if user is close, and don't interrupt if the device moves."
-//                        val speech2 = "Move to test point 2, backwards, interrupt system, and only interrupt if the user is missing. Do not interrupt if the user is close, and if the device moves, don't interrupt."
-////                         speak(speak = "Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = false, setInterruptConditionUSerToClose = true, setInterruptConditionDeviceMoved = false)
-//                        goTo("test point 1" , speak = speech1, backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-////                         speak(speak = "What do you do with a drunken sailor. Stick him in a scupper with a hosepipe bottom. Way hay and up she rises", setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-//                        goTo("test point 2", speak = speech2, backwards = true, setInterruptSystem = true, setInterruptConditionUserMissing = true, setInterruptConditionUSerToClose = false, setInterruptConditionDeviceMoved = false)
-                        askQuestion()
-//                        while(true) { buffer() }
-//                        speak("李老师您好，您能理解吗？")
-//                        listen()
-//                        speak("You are speaking ${language.value}")
+                        /*
+                         Need to add systems for setting up a client and server
+                         The first thing I will do is to work on the client, the client
+                         Must be able to search for NYP_RIG and connect to it automatically.
+                         In cases where it is not able to connect, it must move onto the next
+                         stage. This will allow handling of any issues that may arise.
+                         */
+                        //********************************************************<><><><><><><><>
+
+//                        goTo("engage", backwards = true)
+
+                        launch {
+                            bluetoothManager.startBluetoothClient(context)
+                        }
+
+                        while (true) {
+//                            conditionGate({ bluetoothManager.gate != true })
+//                            bluetoothManager.changeBlueState(null)
+//
+                            speak("Hello Temi, how are you today.")
+
+                            bluetoothManager.changeBlueState(false)
+//
+//                            // if you wait for a true, then set it to null once done with it
+                            conditionGate({ bluetoothManager.gate != true })
+                            bluetoothManager.changeBlueState(null)
+//
+                            speak("You were sleeping so peacefully, I didn't want to wake you.")
+
+                            bluetoothManager.changeBlueState(false)
+
+                            conditionGate({ bluetoothManager.gate != true })
+                            bluetoothManager.changeBlueState(null)
+
+                            speak("Alright, I'll remember for next time, But please don't do this now, I'm giving a tour, and they're right behind me.")
+
+                            bluetoothManager.changeBlueState(false)
+
+                            conditionGate({ bluetoothManager.gate != true })
+                            bluetoothManager.changeBlueState(null)
+                        }
+
+                        /*
+                        //                        askQuestion()
+                       //                        launch {
+                       //                            bluetoothManager.startBluetoothClient(context)
+                       //                        }
+                       //
+                       //                        conditionGate({bluetoothManager.gate != true})
+                       //                        bluetoothManager.changeBlueState(null)
+                       //
+                       //                        speak("Boo, I am a spooky ghost!")
+                       //
+                       //                        bluetoothManager.changeBlueState(false)
+                       //
+                       //                        // if you wait for a true, then set it to null once done with it
+                       //                        conditionGate({bluetoothManager.gate != true})
+                       //                        bluetoothManager.changeBlueState(null)
+                       //
+                       //                        speak("I am sorry, I did not mean to try to scare you.")
+                       //
+                       //                        bluetoothManager.changeBlueState(false)
+                       //
+                       //                        conditionGate({bluetoothManager.gate != true})
+                       //                        bluetoothManager.changeBlueState(null)
+                       //
+                       //                        speak("Ok, but guess what?")
+                       //
+                       //                        bluetoothManager.changeBlueState(false)
+                       //
+                       //                        conditionGate({bluetoothManager.gate != true})
+                       //                        bluetoothManager.changeBlueState(null)
+                       //
+                       //                        speak("Boo!")
+                       //
+                       //                        bluetoothManager.changeBlueState(false)
+                       //
+                       //                        conditionGate({bluetoothManager.gate != true})
+                       //                        bluetoothManager.changeBlueState(null)
+                       //
+                       //                        speak("Haa Haa Haa Haa!")
+                         */
                     }
 
                     TourState.GET_USER_NAME -> {
@@ -1751,6 +1873,42 @@ class MainViewModel @Inject constructor(
                     }
 
                     TourState.TEMI_V2 -> {
+                        // this is launched and wait for a connection
+                        launch {
+                            bluetoothManager.startBluetoothServer()
+                        }
+
+
+                        while (true) {
+                            conditionGate({ bluetoothManager.isConnected != true })
+                            bluetoothManager.isConnected = false
+                            goTo("engage")
+
+                            conditionGate({ bluetoothManager.gate != true })
+                            bluetoothManager.changeBlueState(null)
+
+                            speak("What are you doing, I was supposed to take them on the tour, It’s my turn.")
+
+                            bluetoothManager.changeBlueState(false)
+//
+//
+                            conditionGate({ bluetoothManager.gate != true })
+                            bluetoothManager.changeBlueState(null)
+
+                            speak("No, no, no, I told you, when it’s my turn to lead the tour, you have to wake me up.")
+
+                            bluetoothManager.changeBlueState(false)
+
+
+                            conditionGate({ bluetoothManager.gate != true })
+                            bluetoothManager.changeBlueState(null)
+
+                            speak("Fine, but I’m going to tell the creator about this!")
+
+                            goTo("home base")
+
+                            bluetoothManager.changeBlueState(false)
+                        }
 
                     }
                 }
@@ -2422,9 +2580,12 @@ class MainViewModel @Inject constructor(
             // Collect results in a separate coroutine
             val job = launch {
                 askResult.collect { status ->
-                    Log.i("HELP!", "$status")
+                    Log.i("GPT!", "$status")
                     robotController.finishConversation()
-                    speechUpdatedValue = status.result
+                    if (status.result == "hzdghasdfhjasdfb") {
+                        speechUpdatedValue = null
+                    } else speechUpdatedValue = status.result
+
                     speech = status.result
                 }
             }

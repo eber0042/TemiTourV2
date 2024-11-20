@@ -205,7 +205,7 @@ class RobotController():
     private val _lifted = MutableStateFlow(Lifted(false))
     val lifted = _lifted.asStateFlow() // This can include talking state as well
 
-    private val _askResult = MutableStateFlow(AskResult(" "))
+    private val _askResult = MutableStateFlow(AskResult("hzdghasdfhjasdfb"))
     val askResult = _askResult.asStateFlow()
 
     private val _language = MutableStateFlow(Language.SYSTEM)
@@ -253,7 +253,7 @@ class RobotController():
             speech = speech,
             isShowOnConversationLayer = false,
             showAnimationOnly = haveFace,
-            language = TtsRequest.Language.ZH_CN
+            language = TtsRequest.Language.EN_US
         )
 
         // Need to create TtsRequest
@@ -303,7 +303,7 @@ class RobotController():
     }
 
     fun wakeUp() {
-        robot.wakeup(listOf(SttLanguage.ZH_CN))
+        robot.wakeup(listOf(SttLanguage.SYSTEM))
     }
 
     fun finishConversation() {

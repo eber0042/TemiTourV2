@@ -105,6 +105,7 @@ dependencies {
 
     // Accompanist Permissions
     implementation("com.google.accompanist:accompanist-permissions:0.36.0") // Replace <latest-ver
+
 }
 
 kapt {
