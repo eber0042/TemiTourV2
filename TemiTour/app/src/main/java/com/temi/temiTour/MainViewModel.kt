@@ -910,11 +910,15 @@ class MainViewModel @Inject constructor(
             idleSystem(false)
             initiateTour()
 
+            val job = launch {
+                bluetoothManager.startBluetoothServer()
+            }
+
             launch { // Use this to handle the stateflow changes for tour
                 while (true) { // This will loop the states
 //                    Log.i("DEBUG!", "In start location")
 
-                    if (true) {
+                    if (false) {
 //                        tourState(TourState.TESTING)
 //                        tourState(TourState.START_LOCATION)
 //                        tourState(TourState.ALTERNATE_START)
@@ -1496,26 +1500,19 @@ class MainViewModel @Inject constructor(
                                     script =
                                         context.getString(R.string.too_your_left_is_the_siemens_control_lab_where_our_learners_gain_knowledge_in_areas_such_as_pneumatics_sensors_and_programmable_logic_controllers_also_known_as_plcs_here_actions_like_pick_and_place_are_practiced_and_applied_hands_on_using_industry_standard_equipment_from_siemens_this_provides_our_students_with_first_hand_experience_with_the_technologies_and_skills_the_industry_is_seeking)
 
-
-
-//                                    goTo(
-//                                        location,
-//                                        backwards = backwards,
-//                                        setInterruptSystem = false, // switch this back
-//                                        setInterruptConditionUserMissing = false,
-//                                        setInterruptConditionUSerToClose = false,
-//                                        setInterruptConditionDeviceMoved = false
-//                                    )
-
-                                    launch {
-                                        // delay(5000)
-                                        bluetoothManager.startBluetoothClient(context)
-                                    }
+                                    goTo(
+                                        location,
+                                        backwards = backwards,
+                                        setInterruptSystem = false, // switch this back
+                                        setInterruptConditionUserMissing = false,
+                                        setInterruptConditionUSerToClose = false,
+                                        setInterruptConditionDeviceMoved = false
+                                    )
 
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r412
                                     speak(
-                                        "boo",
+                                        script,
                                         haveFace = false,
                                         setInterruptSystem = false, // switch this back
                                         setInterruptConditionUserMissing = false,
@@ -1526,17 +1523,22 @@ class MainViewModel @Inject constructor(
                                     _shouldPlayGif.value = true
                                     askQuestion()
 
+                                    job.start()
+
                                 }
 
                                 "engage" -> {
+
+                                    bluetoothManager.changeBlueState(false) // This will make
+                                    // Temi v2 go to the engage area
 
                                     goTo("engage", backwards = true)
 
                                     speak("Hello, Temi V2.")
 
-                                    bluetoothManager.changeBlueState(false)
-
                                     speak("How can I help you?")
+
+                                    bluetoothManager.changeBlueState(false)
 
                                     // if you wait for a true, then set it to null once done with it
                                     conditionGate({ bluetoothManager.gate != true })
@@ -1553,6 +1555,7 @@ class MainViewModel @Inject constructor(
 
                                     bluetoothManager.changeBlueState(false)
 
+                                    job.cancel()
                                 }
 
                                 "r410 poster spot" -> {
@@ -1875,13 +1878,14 @@ class MainViewModel @Inject constructor(
                     TourState.TEMI_V2 -> {
                         // this is launched and wait for a connection
                         launch {
-                            bluetoothManager.startBluetoothServer()
+                            bluetoothManager.startBluetoothClient(context)
                         }
 
 
                         while (true) {
-                            conditionGate({ bluetoothManager.isConnected != true })
-                            bluetoothManager.isConnected = false
+                            conditionGate({ bluetoothManager.gate != true })
+                            bluetoothManager.changeBlueState(null)
+
                             goTo("engage")
 
                             conditionGate({ bluetoothManager.gate != true })
