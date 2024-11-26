@@ -711,7 +711,7 @@ class MainViewModel @Inject constructor(
     // Use this to tell system if waiting, Null is default or Error
     private var errorFlagGPT: Boolean = false
 
-    private fun sendMessage(openAI: OpenAI, userResponse: String) {
+    private fun sendMessage(openAI: OpenAI, userResponse: String, info: String = "You are an assistant embedded in a robot. Respond as sassy and snarky as possible to user queries, but keep the ascetic like that of a robot. Ensure to keep responses very short so that it is not above 100 words.") {
         viewModelScope.launch(Dispatchers.Main) {
             try {
                 // Define the model you want to use (GPT-3.5 or GPT-4)
@@ -721,8 +721,7 @@ class MainViewModel @Inject constructor(
                 val chatMessages = mutableListOf(
                     chatMessage {
                         role = ChatRole.System
-                        content =
-                            "You are an assistant embedded in a robot. Respond as sassy and snarky as possible to user queries, but keep the ascetic like that of a robot. Ensure to keep responses very short so that it is not above 100 words."
+                        content = info
                     },
                     chatMessage {
                         role = ChatRole.User
@@ -764,7 +763,7 @@ class MainViewModel @Inject constructor(
             null // clear the text to null so show that it has been used
     }
 
-    private suspend fun askQuestion() {
+    private suspend fun askQuestion(askGPT: Boolean = true) {
         shouldExit = false
         var noQuestion = false
         var response: String? = null
@@ -827,7 +826,7 @@ class MainViewModel @Inject constructor(
 
         Log.i("GPT!", "Passed Question asking")
 
-        if (!noQuestion) {
+        if (!noQuestion && askGPT) {
             Log.i("GPT!", response.toString())
             response?.let { sendMessage(openAI, it) }
 
@@ -845,6 +844,11 @@ class MainViewModel @Inject constructor(
 
             speak(responseGPT.toString())
             responseGPT = null
+        }
+
+        if (!askGPT) {
+            responseGPT =  response
+            speak("Sorry, I do not actually know that question.")
         }
     }
 
@@ -1659,10 +1663,108 @@ class MainViewModel @Inject constructor(
                          */
                         //********************************************************<><><><><><><><>
 
-//                        goTo("engage", backwards = true)
+                       // askQuestion(askGPT = false)
+
+                        job.start()
+
+                        val userQuestion = "If the moon was made of cheese, what type of cheese would it be made from?"//responseGPT
+                        responseGPT = null
+
+// Prompts for V2 and V3
+                        val v2prompt = "You are a robot named Temi and are the second iteration. You are talking to your older sibling, also named Temi, who is version three. Keep your responses short. Your sibling has said: "
+                        val v3prompt = "You are a robot named Temi and are the third iteration. You are talking to your younger sibling, also named Temi, who is version two. Keep your responses short. Your sibling has said: "
+
+// V3's initial greeting
+                        val greetingInitial = "Hello Temi V2, someone from my tour has asked me '$userQuestion'? I did not know the answer. Could you tell them for me?"
+
+// Responses from V2 and V3
+                        var responseOneV2: String? = null
+                        var responseOneV3: String? = null
+                        var responseTwoV2: String? = null
+                        var responseTwoV3: String? = null
+                        var responseThreeV2: String? = null
 
                         launch {
-                            bluetoothManager.startBluetoothClient(context)
+                            // V2 responds to V3's initial greeting
+                            sendMessage(openAI, greetingInitial, "$v2prompt'$greetingInitial'")
+                            conditionGate({ responseGPT == null })
+                            responseOneV2 = responseGPT
+                            responseGPT = null
+
+                            // V3 responds to V2's reply and thanks V2
+                            sendMessage(
+                                openAI,
+                                "responseOneV2",
+                                "$v3prompt'$responseOneV2' You had previously responded with '$greetingInitial'. Thank Temi V2 for the response."
+                            )
+                            conditionGate({ responseGPT == null })
+                            responseOneV3 = responseGPT
+                            responseGPT = null
+
+                            // V2 responds to V3's gratitude with a quip
+                            sendMessage(
+                                openAI,
+                                responseOneV3 as String,
+                                "$v2prompt'$responseOneV3' You had previously responded with '$responseOneV2'. Make a quip about how it was your turn to take the tour, and Temi V3 did not wake you up."
+                            )
+                            conditionGate({ responseGPT == null })
+                            responseTwoV2 = responseGPT
+                            responseGPT = null
+
+                            // V3 apologizes and ends the argument
+                            sendMessage(
+                                openAI,
+                                responseTwoV2 as String,
+                                "$v3prompt'$responseTwoV2' You had previously responded with '$responseOneV3'. Apologize and ask Temi V2 to stop continuing this argument, as you are in the middle of the tour."
+                            )
+                            conditionGate({ responseGPT == null })
+                            responseTwoV3 = responseGPT
+                            responseGPT = null
+
+                            // V2 responds unhappily and threatens to inform the creator
+                            sendMessage(
+                                openAI,
+                                responseTwoV3 as String,
+                                "$v2prompt'$responseTwoV3' You had previously responded with '$responseTwoV2'. Express unhappiness and state that you will inform the creator about this."
+                            )
+                            conditionGate({ responseGPT == null })
+                            responseThreeV2 = responseGPT
+                            responseGPT = null
+                        }
+
+                        delay(5000)
+
+// Enable ChatGPT responses via Bluetooth
+                        bluetoothManager.isChatGPT = true
+                        bluetoothManager.gate = false
+
+// Simulating the conversation
+                        speak(greetingInitial) // V3 initiates
+
+                        conditionGate({ responseOneV2 == null })
+                        bluetoothManager.conversation = responseOneV2
+
+
+                        conditionGate({ bluetoothManager.gate != true })
+                        bluetoothManager.changeBlueState(null)
+                        conditionGate({ responseOneV3 == null })
+                        speak(responseOneV3) // V3's reply
+
+                        conditionGate({ responseTwoV2 == null })
+                        bluetoothManager.conversation = responseTwoV2
+
+
+
+                        conditionGate({ bluetoothManager.gate != true })
+                        bluetoothManager.changeBlueState(null)
+                        conditionGate({ responseTwoV3 == null })
+                        speak(responseTwoV3) // V3's apology
+
+                        conditionGate({ responseThreeV2 == null })
+                        bluetoothManager.conversation = responseThreeV2
+
+                        while(true) {
+                            buffer()
                         }
 
                         while (true) {
@@ -1886,45 +1988,67 @@ class MainViewModel @Inject constructor(
 
                     TourState.TEMI_V2 -> {
                         // this is launched and wait for a connection
+                        playWaitMusic = true
+
                         launch {
                             bluetoothManager.startBluetoothClient(context)
                             }
 
+                        conditionGate({ bluetoothManager.gate != true })
+                        bluetoothManager.changeBlueState(null)
 
-                        if (ChatGPT)
+                        if (bluetoothManager.isChatGPT) {
+                            conditionGate({ bluetoothManager.receivedConversation == null })
+                            speak(bluetoothManager.receivedConversation)
+                            bluetoothManager.receivedConversation = null
+                            bluetoothManager.gate = false
 
-                        while (true) {
-                            conditionGate({ bluetoothManager.gate != true })
-                            bluetoothManager.changeBlueState(null)
-                            goTo("engage")
+                            conditionGate({ bluetoothManager.receivedConversation == null })
+                            speak(bluetoothManager.receivedConversation)
+                            bluetoothManager.receivedConversation = null
+                            bluetoothManager.gate = false
 
-                            conditionGate({ bluetoothManager.gate != true })
-                            bluetoothManager.changeBlueState(null)
+                            conditionGate({ bluetoothManager.receivedConversation == null })
+                            speak(bluetoothManager.receivedConversation)
+                            bluetoothManager.receivedConversation = null
+                            bluetoothManager.gate = false
 
-                            speak("What are you doing, I was supposed to take them on the tour, It’s my turn.")
 
-                            bluetoothManager.changeBlueState(false)
+                            bluetoothManager.isChatGPT = false
+                        } else {
+                            while (true) {
+                                speak("Goodbye")
+                                conditionGate({ bluetoothManager.gate != true })
+                                bluetoothManager.changeBlueState(null)
+                                goTo("engage")
+
+                                conditionGate({ bluetoothManager.gate != true })
+                                bluetoothManager.changeBlueState(null)
+
+                                speak("What are you doing, I was supposed to take them on the tour, It’s my turn.")
+
+                                bluetoothManager.changeBlueState(false)
 //
 //
-                            conditionGate({ bluetoothManager.gate != true })
-                            bluetoothManager.changeBlueState(null)
+                                conditionGate({ bluetoothManager.gate != true })
+                                bluetoothManager.changeBlueState(null)
 
-                            speak("No, no, no, I told you, when it’s my turn to lead the tour, you have to wake me up.")
+                                speak("No, no, no, I told you, when it’s my turn to lead the tour, you have to wake me up.")
 
-                            bluetoothManager.changeBlueState(false)
+                                bluetoothManager.changeBlueState(false)
 
 
-                            conditionGate({ bluetoothManager.gate != true })
-                            bluetoothManager.changeBlueState(null)
+                                conditionGate({ bluetoothManager.gate != true })
+                                bluetoothManager.changeBlueState(null)
 
-                            speak("Fine, but I’m going to tell the creator about this!")
+                                speak("Fine, but I’m going to tell the creator about this!")
 
-                            bluetoothManager.changeBlueState(false)
+                                bluetoothManager.changeBlueState(false)
 
-                            goTo("home base")
+                                goTo("home base")
 
+                            }
                         }
-
                     }
                 }
                 buffer()

@@ -1,7 +1,6 @@
 package com.temi.temiTour.ui.theme
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
@@ -11,10 +10,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.util.Log
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -25,9 +20,6 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.util.UUID
 import javax.inject.Singleton
-import kotlin.concurrent.thread
-import java.util.Timer
-import kotlin.concurrent.schedule
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -47,6 +39,8 @@ class BluetoothManager {
     var isConnected = false
     var shouldDisconnectFromServer = false
     var isChatGPT = false
+    var conversation: String? = null
+    var receivedConversation: String? = null
     private val timer = Stopwatch()
 
     private var messageToSend = "Hello from client!"
@@ -67,7 +61,7 @@ class BluetoothManager {
             var sent = true
             while (true) {
                 // Example: Write data to the server
-                if (gate == null && sent == true) {
+                if (gate == null && sent) {
                     messageToSend = "IDLE"
                 } else if (gate == false) {
                     messageToSend = "END"
@@ -78,7 +72,7 @@ class BluetoothManager {
                 }
                 outputStream.write(messageToSend.toByteArray())
                 if (messageToSend == "END") {sent = true; Log.i("BluetoothClient", "Sent: $messageToSend")}
-                if (gate == false) gate = null
+                if (gate == false) {gate = null}
 
                 // Read response from server
                 val buffer = ByteArray(1024)
@@ -86,6 +80,8 @@ class BluetoothManager {
                 val bytes = inputStream.read(buffer)
                 val response = String(buffer, 0, bytes)
                 if (response == "END") {gate = true; Log.i("BluetoothClient", "Received: $response")}
+                else if (response == "GPT") { isChatGPT = true; ; Log.i("BluetoothClient", "Received: $response") }
+                else if (response != "IDLE" && response != "ERROR") {receivedConversation = response; Log.i("BluetoothClient", "Received: $response")}
             }
         } catch (e: IOException) {
             Log.e("BluetoothClient", "Error during communication: ${e.message}")
@@ -219,6 +215,7 @@ class BluetoothManager {
             val outputStream = socket.outputStream
 
             var sent = true
+            var sent1 = true
 
             while (true) {
                 try {
@@ -232,19 +229,28 @@ class BluetoothManager {
                     if (receivedMessage == "END") {gate = true; Log.i("BluetoothServer", "Received: $receivedMessage")}
 
                     // Respond to the client
-                    if (gate == null && sent == true) {
+                    if (gate == null && sent && !isChatGPT && conversation == null) {
                         messageToSend = "IDLE"
+                    } else if (isChatGPT) {
+                        messageToSend = "GPT"
+                        isChatGPT =  false
+                        sent1 = false
+                    } else if (conversation != null) {
+                        messageToSend = conversation as String
+                        conversation =  null
                     } else if (gate == false) {
                         messageToSend = "END"
                         gate = null
                         sent = false
-                    } else if (isChatGPT) {
-                        messageToSend = "GPT"
                     } else {
                         messageToSend = "ERROR"
+                        Log.i("BluetoothServer", "gate: $gate, sent: $sent, isChatGPT: $isChatGPT, conversation: $conversation")
                     }
+
                     outputStream.write(messageToSend.toByteArray())
                     if (messageToSend == "END") {sent = true; Log.i("BluetoothServer", "Sent: $messageToSend")}
+                    else if (messageToSend == "GPT") {sent1 = true; Log.i("BluetoothServer", "Sent: $messageToSend")}
+                    else if (messageToSend != "IDLE") { Log.i("BluetoothServer", "Sent: $messageToSend") }
 
 
                 } catch (e: IOException) {
