@@ -46,6 +46,7 @@ class BluetoothManager {
     var gate: Boolean? = null
     var isConnected = false
     var shouldDisconnectFromServer = false
+    var isChatGPT = false
     private val timer = Stopwatch()
 
     private var messageToSend = "Hello from client!"
@@ -58,44 +59,38 @@ class BluetoothManager {
     // check out if there is a timeout for the socket
 // Function to handle Bluetooth communication
     @SuppressLint("MissingPermission")
-    private suspend fun handleConnectionClient(socket: BluetoothSocket): Boolean {
+    private suspend fun handleConnectionClient(socket: BluetoothSocket) {
         val outputStream = socket.outputStream
         val inputStream = socket.inputStream
-        var isConnected = true // Connection status
 
         try {
             var sent = true
-            while (isConnected) {
-                // Write data to the server
-                val messageToSend = when {
-                    gate == null && sent -> "IDLE"
-                    gate == false -> {
-                        sent = false
-                        "END"
-                    }
-                    else -> "ERROR"
+            while (true) {
+                // Example: Write data to the server
+                if (gate == null && sent == true) {
+                    messageToSend = "IDLE"
+                } else if (gate == false) {
+                    messageToSend = "END"
+                    gate = null
+                    sent = false
+                } else {
+                    messageToSend = "ERROR"
                 }
                 outputStream.write(messageToSend.toByteArray())
-                Log.i("BluetoothClient", "Sent: $messageToSend")
-
-                if (messageToSend == "END") {
-                    sent = true
-                    gate = null
-                }
+                if (messageToSend == "END") {sent = true; Log.i("BluetoothClient", "Sent: $messageToSend")}
+                if (gate == false) gate = null
 
                 // Read response from server
                 val buffer = ByteArray(1024)
+//                Log.i("BluetoothClient", "Waiting for message...")
                 val bytes = inputStream.read(buffer)
                 val response = String(buffer, 0, bytes)
-                Log.i("BluetoothClient", "Received: $response")
-
-                if (response == "END") {
-                    gate = true
-                }
+                if (response == "END") {gate = true; Log.i("BluetoothClient", "Received: $response")}
             }
         } catch (e: IOException) {
-            isConnected = false
-            Log.e("BluetoothClient", "Communication error: ${e.message}")
+            Log.e("BluetoothClient", "Error during communication: ${e.message}")
+        } catch (e: InterruptedException) {
+            Log.e("BluetoothClient", "Client thread interrupted: ${e.message}")
         } finally {
             try {
                 socket.close()
@@ -103,26 +98,6 @@ class BluetoothManager {
             } catch (e: IOException) {
                 Log.e("BluetoothClient", "Error closing socket: ${e.message}")
             }
-        }
-
-        return false // Signal that the connection is no longer active
-    }
-
-    // Function to connect to a Bluetooth device
-    @SuppressLint("MissingPermission")
-    private suspend fun connectToDevice(device: BluetoothDevice): Boolean {
-        return try {
-            val socket = device.createInsecureRfcommSocketToServiceRecord(
-                UUID.fromString("27c32b80-3a56-4331-8667-718a84776241") // Replace with your UUID
-            )
-            socket.connect()
-            Log.i("BluetoothClient", "Connected to ${device.name} - ${device.address}")
-
-            // Pass the socket to handle connection
-            handleConnectionClient(socket)
-        } catch (e: IOException) {
-            Log.e("BluetoothClient", "Error connecting to device: ${e.message}")
-            false
         }
     }
 
@@ -134,45 +109,107 @@ class BluetoothManager {
             return
         }
 
-        // Replace with the name of your target device
+        var isDeviceFound = false
+        val discoveredDevices = mutableSetOf<BluetoothDevice>()
         val targetDeviceName = "NYP BOA"
-        var targetDevice: BluetoothDevice? = null
 
-        // Look for the target device in paired devices
-        val pairedDevices = bluetoothAdapter.bondedDevices
-        for (device in pairedDevices) {
-            if (device.name == targetDeviceName) {
-                targetDevice = device
-                break
+        // Start discovery
+        fun startDiscovery() {
+            if (bluetoothAdapter.isDiscovering) {
+                bluetoothAdapter.cancelDiscovery()
+            }
+            bluetoothAdapter.startDiscovery()
+            Log.i("BluetoothClient", "Started discovery.")
+        }
+
+        // Stop discovery
+        fun stopDiscovery(adapter: BluetoothAdapter) {
+            if (adapter.isDiscovering) {
+                adapter.cancelDiscovery()
+            }
+            Log.i("BluetoothClient", "Stopped discovery.")
+        }
+
+        // Register a BroadcastReceiver for device discovery
+        val filter = IntentFilter(BluetoothDevice.ACTION_FOUND)
+        val receiver = object : BroadcastReceiver() {
+            @SuppressLint("MissingPermission")
+            override fun onReceive(context: Context, intent: Intent) {
+                val action = intent.action
+                if (BluetoothDevice.ACTION_FOUND == action) {
+                    val device: BluetoothDevice? =
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    device?.let {
+                        Log.i("BluetoothClient", "Device found: ${it.name} - ${it.address}")
+                        if (it.name == targetDeviceName && !discoveredDevices.contains(it)) {
+                            discoveredDevices.add(it)
+                            Log.i(
+                                "BluetoothClient",
+                                "TARGET Device found: ${it.name} - ${it.address}"
+                            )
+                            isDeviceFound = true
+                            stopDiscovery(bluetoothAdapter)
+                        }
+                    }
+                }
             }
         }
 
-        if (targetDevice == null) {
-            Log.e("BluetoothClient", "Target device $targetDeviceName not found in paired devices.")
-            return
+        // Register receiver
+        context.applicationContext.registerReceiver(receiver, filter)
+
+        // Continuous discovery loop
+        withContext(Dispatchers.IO) {
+            while (!isDeviceFound) {
+                startDiscovery()
+
+// Give the discovery process time to find devices
+                for (i in 0 until 120) { // Bluetooth discovery typically takes up to 12 seconds
+                    if (isDeviceFound) {
+                        Log.i("BluetoothClient", "Device found, exiting discovery loop.")
+                        break // Exit early if a device is found
+                    }
+
+                    delay(100)
+                }
+
+                if (!isDeviceFound) {
+                    Log.i("BluetoothClient", "Restarting discovery...")
+                    stopDiscovery(bluetoothAdapter)
+                }
+            }
         }
+
+        // Unregister receiver after the target device is found
+        context.applicationContext.unregisterReceiver(receiver)
 
         while (true) {
-            try {
-                Log.i("BluetoothClient", "Attempting to connect to ${targetDevice.name}...")
-                val isConnected = withContext(Dispatchers.IO) {
-                    connectToDevice(targetDevice)
-                }
+            // Connect to the found device
+            if (discoveredDevices.isNotEmpty()) {
+                Log.i("BluetoothClient", "Attempting connection to the target device.")
+                withContext(Dispatchers.IO) {
+                    try {
+                        val socket = discoveredDevices.first().createInsecureRfcommSocketToServiceRecord(
+                            UUID.fromString("27c32b80-3a56-4331-8667-718a84776241") // Replace with your UUID
+                        )
+                        socket.connect()
+                        Log.i("BluetoothClient!", "Connected to ${discoveredDevices.first().name} - ${discoveredDevices.first().address}")
 
-                if (isConnected) {
-                    Log.i("BluetoothClient", "Connection established. Communication started.")
-                    break // Exit the loop if the connection is successful
-                } else {
-                    Log.e("BluetoothClient", "Connection attempt failed. Retrying...")
-                }
+                        // Handle communication here
+                        handleConnectionClient(socket)
 
-            } catch (e: Exception) {
-                Log.e("BluetoothClient", "Error during connection attempt: ${e.message}")
+                    } catch (e: IOException) {
+                        Log.e("BluetoothClient!", "Error connecting to device: ${e.message}. Will delay 3 seconds before reattempt.")
+                    }
+                }
+            } else {
+                Log.e("BluetoothClient", "No target device found.")
             }
 
-            delay(3000) // Wait before retrying
+            delay(3000)
         }
     }
+
 
     //******************************************* Connect Server:
     @SuppressLint("MissingPermission")
@@ -185,7 +222,7 @@ class BluetoothManager {
 
             while (true) {
                 try {
-
+                    isConnected = true
 
                     // Read data sent by the client
                     val buffer = ByteArray(1024)
@@ -200,7 +237,9 @@ class BluetoothManager {
                     } else if (gate == false) {
                         messageToSend = "END"
                         gate = null
-                        sent == false
+                        sent = false
+                    } else if (isChatGPT) {
+                        messageToSend = "GPT"
                     } else {
                         messageToSend = "ERROR"
                     }
@@ -237,30 +276,27 @@ class BluetoothManager {
             return
         }
 
+        // Server listening for client connections in a separate thread
         Thread {
             while (true) {
                 var serverSocket: BluetoothServerSocket? = null
                 try {
                     serverSocket = bluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord(
-                        "MyCustomService",
-                        uuid
+                        "MyCustomService", uuid
                     )
 
                     while (true) {
                         try {
-                            isConnected = false
                             Log.i("BluetoothServer", "Server socket created. Waiting for connections...")
                             val socket = serverSocket.accept() // Block until a connection is made
-                            Log.i(
-                                "BluetoothServer",
-                                "Connection accepted from ${socket.remoteDevice.name} - ${socket.remoteDevice.address}"
-                            )
-                            isConnected = true
+                            Log.i("BluetoothServer", "Connection accepted from ${socket.remoteDevice.name} - ${socket.remoteDevice.address}")
 
-                            handleConnectionServer(socket) // Handle the connection
+                            // Handle the connection in a separate function
+                            handleConnectionServer(socket)
                         } catch (e: IOException) {
                             Log.e("BluetoothServer", "Error accepting connection: ${e.message}")
-                            break // Exit the loop if there's an error
+                            // Continue to listen for new connections even if there's an error
+                            continue
                         }
                     }
                 } catch (e: IOException) {
@@ -271,13 +307,12 @@ class BluetoothManager {
                         Log.i("BluetoothServer", "Server socket closed.")
                     } catch (e: IOException) {
                         Log.e("BluetoothServer", "Error closing server socket: ${e.message}")
-                    } finally {
-                        isConnected = false
                     }
                 }
             }
         }.start()
     }
+
 //*******************************************
 }
 

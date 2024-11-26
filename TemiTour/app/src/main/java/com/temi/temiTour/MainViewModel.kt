@@ -918,15 +918,15 @@ class MainViewModel @Inject constructor(
                 while (true) { // This will loop the states
 //                    Log.i("DEBUG!", "In start location")
 
-                    if (false) {
-//                        tourState(TourState.TESTING)
+                    if (true) {
+                        tourState(TourState.TESTING)
 //                        tourState(TourState.START_LOCATION)
 //                        tourState(TourState.ALTERNATE_START)
 //                        tourState(TourState.STAGE_1_B)
 //                        tourState(TourState.STAGE_1_1_B)
 //                        tourState(TourState.GET_USER_NAME)
-                        tourState(TourState.STAGE_1_2_B)
-                        tourState(TourState.TOUR_END)
+//                        tourState(TourState.STAGE_1_2_B)
+//                        tourState(TourState.TOUR_END)
 
                     } else {
                         tourState(TourState.TEMI_V2)
@@ -1512,7 +1512,7 @@ class MainViewModel @Inject constructor(
                                     _shouldPlayGif.value = false
                                     _imageResource.value = R.drawable.r412
                                     speak(
-                                        script,
+                                        "boo",
                                         haveFace = false,
                                         setInterruptSystem = false, // switch this back
                                         setInterruptConditionUserMissing = false,
@@ -1529,31 +1529,36 @@ class MainViewModel @Inject constructor(
 
                                 "engage" -> {
 
-                                    bluetoothManager.changeBlueState(false) // This will make
-                                    // Temi v2 go to the engage area
+                                    if (bluetoothManager.isConnected) {
+                                        bluetoothManager.changeBlueState(false) // This will make
 
-                                    goTo("engage", backwards = true)
+                                        // Temi v2 go to the engage area
+                                        goTo("engage", backwards = true)
 
-                                    speak("Hello, Temi V2.")
+                                        speak("Hello, Temi V2.")
 
-                                    speak("How can I help you?")
+                                        speak("How can I help you?")
 
-                                    bluetoothManager.changeBlueState(false)
+                                        bluetoothManager.changeBlueState(false)
 
-                                    // if you wait for a true, then set it to null once done with it
-                                    conditionGate({ bluetoothManager.gate != true })
-                                    bluetoothManager.changeBlueState(null)
+                                        // if you wait for a true, then set it to null once done with it
+                                        conditionGate({ bluetoothManager.gate != true })
+                                        bluetoothManager.changeBlueState(null)
 
-                                    speak("You were sleeping so peacefully. I didn't want to wake you.")
+                                        speak("You were sleeping so peacefully. I didn't want to wake you.")
 
-                                    bluetoothManager.changeBlueState(false)
+                                        bluetoothManager.changeBlueState(false)
 
-                                    conditionGate({ bluetoothManager.gate != true })
-                                    bluetoothManager.changeBlueState(null)
+                                        conditionGate({ bluetoothManager.gate != true })
+                                        bluetoothManager.changeBlueState(null)
 
-                                    speak("Alright, I'll remember for next time. But please don't do this now, I'm giving a tour, and they're right behind me.")
+                                        speak("Alright, I'll remember for next time. But please don't do this now, I'm giving a tour, and they're right behind me.")
 
-                                    bluetoothManager.changeBlueState(false)
+                                        bluetoothManager.changeBlueState(false)
+
+                                        conditionGate({ bluetoothManager.gate != true })
+                                        bluetoothManager.changeBlueState(null)
+                                    }
 
                                     job.cancel()
                                 }
@@ -1606,6 +1611,10 @@ class MainViewModel @Inject constructor(
                             // Check the condition and wait before the next statement
                             conditionTimer({ followState == BeWithMeState.SEARCH }, 5)
                         }
+
+                        goTo("return")
+
+                        delay(3000)
 
                         goTo("home base")
 
@@ -1879,13 +1888,14 @@ class MainViewModel @Inject constructor(
                         // this is launched and wait for a connection
                         launch {
                             bluetoothManager.startBluetoothClient(context)
-                        }
+                            }
 
+
+                        if (ChatGPT)
 
                         while (true) {
                             conditionGate({ bluetoothManager.gate != true })
                             bluetoothManager.changeBlueState(null)
-
                             goTo("engage")
 
                             conditionGate({ bluetoothManager.gate != true })
@@ -1909,9 +1919,10 @@ class MainViewModel @Inject constructor(
 
                             speak("Fine, but I’m going to tell the creator about this!")
 
+                            bluetoothManager.changeBlueState(false)
+
                             goTo("home base")
 
-                            bluetoothManager.changeBlueState(false)
                         }
 
                     }
@@ -2742,4 +2753,3 @@ class PositionChecker(
         return xClose && yClose && yawClose
     }
 }
-
