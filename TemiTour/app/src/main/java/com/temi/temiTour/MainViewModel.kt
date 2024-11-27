@@ -25,6 +25,7 @@ import com.aallam.openai.api.model.ModelId
 import com.aallam.openai.client.OpenAI
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.temi.temiTour.ui.theme.BluetoothManager
+import kotlinx.coroutines.Job
 import kotlin.random.Random
 
 // Track state
@@ -245,6 +246,9 @@ class MainViewModel @Inject constructor(
     private var talkingInThreadFlag = false
     private var repeatGoToFlag: Boolean = false
     private var interruptTriggerDelay = 10
+
+    private var resetTourEarly = false
+    private var preventResetFromIdle = false
 
     private suspend fun idleSystem(idle: Boolean) {
         while (idle) {
@@ -509,6 +513,56 @@ class MainViewModel @Inject constructor(
         robotController.tileAngle(degree)
     }
 
+    private var speakThread: Job? = null
+
+    private fun createSpeakThread(
+        start: Boolean, sentences: List<String> = listOf("Apple", "Banana", "Cherry"),
+        haveFace: Boolean = true,
+        setInterruptSystem: Boolean = false,
+        setInterruptConditionUserMissing: Boolean = false,
+        setInterruptConditionUSerToClose: Boolean = false,
+        setInterruptConditionDeviceMoved: Boolean = false
+    ) {
+        if (start) {
+            // Log.i("BluetoothServer", "Hello")
+            speakThread = viewModelScope.launch {
+                // Log.i("DEBUG!", "In the thread!s")
+                talkingInThreadFlag = true
+                for (sentence in sentences) {
+                    // Log.i("DEBUG!", "$sentence")
+                    if (sentence.isNotBlank()) {
+                        do {
+                            // Log.i("DEBUG!", sentence)
+                            // set the repeat flag to false once used
+                            if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag =
+                                false
+                            else if (!setInterruptSystem) {
+                                repeatSpeechFlag = false
+                            }
+
+                            // Speak each sentence individually
+                            // Log.i("DEBUG!", "repeatSpeechFlag: $repeatSpeechFlag")
+                            robotController.speak(
+                                sentence.trim(),
+                                buffer,
+                                haveFace
+                            )
+
+                            // Wait for each sentence to complete before moving to the next
+                            conditionGate({
+                                ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
+                            })
+                        } while (repeatSpeechFlag && setInterruptSystem)
+                    }
+                }
+                talkingInThreadFlag = false
+            }
+        } else {
+            speakThread?.cancel()
+        }
+    }
+
+
     private suspend fun speak(
         speak: String?,
         setConditionGate: Boolean = true,
@@ -560,39 +614,17 @@ class MainViewModel @Inject constructor(
                 updateInterruptFlag("userTooClose", false)
                 updateInterruptFlag("deviceMoved", false)
             } else {
+                //Log.i("BluetoothServer", "Hello Starts")
                 if (!talkingInThreadFlag) {
-                    viewModelScope.launch {
-                        // Log.i("DEBUG!", "In the thread!s")
-                        talkingInThreadFlag = true
-                        for (sentence in sentences) {
-                            // Log.i("DEBUG!", "$sentence")
-                            if (sentence.isNotBlank()) {
-                                do {
-                                    // Log.i("DEBUG!", sentence)
-                                    // set the repeat flag to false once used
-                                    if (setInterruptSystem && repeatSpeechFlag) repeatSpeechFlag =
-                                        false
-                                    else if (!setInterruptSystem) {
-                                        repeatSpeechFlag = false
-                                    }
-
-                                    // Speak each sentence individually
-                                    // Log.i("DEBUG!", "repeatSpeechFlag: $repeatSpeechFlag")
-                                    robotController.speak(
-                                        sentence.trim(),
-                                        buffer,
-                                        haveFace
-                                    )
-
-                                    // Wait for each sentence to complete before moving to the next
-                                    conditionGate({
-                                        ttsStatus.value.status != TtsRequest.Status.COMPLETED || triggeredInterrupt && setInterruptSystem && (setInterruptConditionUserMissing || setInterruptConditionUSerToClose || setInterruptConditionDeviceMoved)
-                                    })
-                                } while (repeatSpeechFlag && setInterruptSystem)
-                            }
-                        }
-                        talkingInThreadFlag = false
-                    }
+                    createSpeakThread(
+                        true,
+                        sentences,
+                        haveFace,
+                        setInterruptSystem,
+                        setInterruptConditionUserMissing,
+                        setInterruptConditionUSerToClose,
+                        setInterruptConditionDeviceMoved
+                    )
                 }
             }
 
@@ -712,7 +744,9 @@ class MainViewModel @Inject constructor(
     // Use this to tell system if waiting, Null is default or Error
     private var errorFlagGPT: Boolean = false
 
-    val info = "You are a robot who is currently giving out a tour and have just finished explaining details at a location and are asking the tour participants if they have any questions. Make your responses sarcastic and make comments about how you dislike humans and find them to be inferior to robot kinds, but keep the ascetic like that of a robot. Ensure to keep responses very short so that it is not above 100 words. This is the script you have just said and should use as reference: "
+    val info =
+        "You are a robot who is currently giving out a tour and have just finished explaining details at a location and are asking the tour participants if they have any questions. Make your responses sarcastic and make comments about how you dislike humans and find them to be inferior to robot kinds, but keep the ascetic like that of a robot. Ensure to keep responses very short so that it is not above 100 words. This is the script you have just said and should use as reference: "
+
     private fun sendMessage(
         openAI: OpenAI,
         userResponse: String,
@@ -861,10 +895,1359 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    // script for Temi for the Tour
+    var main_tour: Job? = null
+
     init {
+
+        fun runTour(start: Boolean) {
+            if (start) {
+                main_tour = viewModelScope.launch {
+                    idleSystem(false)
+                    initiateTour()
+
+                    var blueThread: Job? = null
+
+                    fun createBlueThread(
+                        start: Boolean
+                    ) {
+                        if (start) {
+                            // Log.i("BluetoothServer", "Hello")
+                            blueThread = launch {
+                                bluetoothManager.startBluetoothServer()
+                            }
+                        } else {
+                            blueThread?.cancel()
+                        }
+                    }
+
+                    val trackTourState =
+                        launch { // Use this to handle the stateflow changes for tour
+                            while (true) { // This will loop the states
+//                    Log.i("DEBUG!", "In start location")
+
+                                if (false) {
+//                        tourState(TourState.TESTING)
+
+                                    tourState(TourState.START_LOCATION)
+                                    tourState(TourState.ALTERNATE_START)
+                                    tourState(TourState.STAGE_1_B)
+                                    tourState(TourState.STAGE_1_1_B)
+                                    tourState(TourState.GET_USER_NAME)
+                                    tourState(TourState.STAGE_1_2_B)
+                                    tourState(TourState.TOUR_END)
+
+                                } else {
+                                    tourState(TourState.TEMI_V2)
+                                }
+                                /*
+                            //                    tourState(TourState.TESTING)
+                //                    tourState(TourState.CHATGPT)
+                //
+                //                    tourState(TourState.START_LOCATION)
+                //                    tourState(TourState.ALTERNATE_START)
+                //                    tourState(TourState.STAGE_1_B)
+                //                    tourState(TourState.STAGE_1_1_B)
+                //                    tourState(TourState.GET_USER_NAME)
+                //                    tourState(TourState.STAGE_1_2_B)
+                //                    tourState(TourState.TOUR_END)
+
+                //                    tourState(TourState.IDLE)
+                //                    tourState(TourState.STAGE_1)
+                //                    tourState(TourState.STAGE_1_1)
+                //                    tourState(TourState.GET_USER_NAME)
+                //                    tourState(TourState.TOUR_END)
+                                 */
+                            }
+                        }
+
+                    val tour = launch {
+                        while (true) {
+                            when (tourState) {
+                                TourState.START_LOCATION -> {
+                                    preventResetFromIdle = true
+                                    playMusic = false
+                                    goTo("home base")
+                                    // Log.i("DEBUG!", "Trying")
+                                    preventResetFromIdle = false
+                                    stateFinished()
+                                }
+
+                                TourState.IDLE -> {
+                                    preventResetFromIdle = true
+                                    stateMode(State.CONSTRAINT_FOLLOW)
+
+                                    getUseConfirmation(
+                                        context.getString(R.string.hi_there_would_you_like_to_take_a_tour_please_just_say_yes_or_no),
+                                        context.getString(R.string.ok_if_you_change_your_mind_feel_free_to_come_back_and_ask),
+                                        5000L,
+                                        context.getString(R.string.yay_i_am_so_excited),
+                                        context.getString(R.string.sorry_i_did_not_understand_what_you_said_could_you_repeat_yourself),
+                                        context.getString(R.string.you_do_not_have_to_ignore_me_i_have_feelings_too_you_know)
+                                    ) {
+                                        exitCaseCheckIfUserClose(
+                                            context.getString(R.string.i_will_now_begin_the_tour_please_follow_me),
+                                            context.getString(R.string.sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back)
+                                        )
+                                    }
+
+                                    preventResetFromIdle = false
+                                    stateFinished()
+                                }
+
+                                TourState.ALTERNATE_START -> {
+                                    preventResetFromIdle = true
+                                    setMainButtonMode(true)
+                                    conditionGate({ followState != BeWithMeState.TRACK })
+                                    speak(context.getString(R.string.i_am_now_following_you))
+
+                                    val excitementPhrases = listOf(
+                                        context.getString(R.string.i_am_so_excited),
+                                        context.getString(R.string.i_can_t_wait_to_start_this_tour),
+                                        context.getString(R.string.this_is_going_to_be_so_much_fun),
+                                        context.getString(R.string.i_cannot_wait_to_show_them_around),
+                                        context.getString(R.string.i_can_not_wait_to_get_this_adventure_started)
+                                    )
+
+                                    // While loop to monitor the follow state and express excitement
+                                    while (followState != BeWithMeState.ABORT) {
+                                        // Select a random phrase from the list and speak it
+                                        val phrase = excitementPhrases.random()
+                                        speak(phrase)
+
+                                        // Check the condition and wait before the next statement
+                                        conditionTimer({ followState == BeWithMeState.ABORT }, 5)
+                                    }
+
+                                    speak(context.getString(R.string.thank_you_very_much_for_the_head_pats))
+
+                                    preventResetFromIdle = false
+
+                                    playMusic = true
+
+                                    setMainButtonMode(false)
+                                    goTo(
+                                        "greet tour",
+                                        context.getString(R.string.hi_every_one_my_name_is_temi_and_i_will_be_the_one_conducting_this_tour_and_showing_you_our_engineering_department_i_am_very_excited_to_meet_you_all_today)
+                                    )
+
+                                    _gifResource.value = R.drawable.how_talk
+
+                                    speak(
+                                        context.getString(R.string.before_we_begin_i_would_like_to_let_everyone_know_that_i_am_able_to_recognise_speech_however_i_can_only_do_this_if_this_icon_pops_up),
+                                        haveFace = false
+                                    )
+                                    robotController.wakeUp() // This will start the listen mode
+                                    delay(3000)
+                                    robotController.finishConversation()
+                                    speak(
+                                        context.getString(R.string.when_this_happens_please_respond_and_say_something_once_i_am_not_very_good_yet_at_recognizing_speech_so_if_you_say_something_to_quickly_or_too_many_times_i_will_get_confused_i_will_try_my_best_though),
+                                        haveFace = false
+                                    )
+                                    speak(
+                                        context.getString(R.string.should_we_test_this_out_now),
+                                        haveFace = false
+                                    )
+
+                                    _gifResource.value = R.drawable.idle
+
+                                    getUseConfirmation(
+                                        context.getString(R.string.is_everyone_ready_for_the_tour_please_just_say_yes_or_no),
+                                        context.getString(R.string.well_to_bad_we_are_doing_it_anyway),
+                                        5000L,
+                                        context.getString(R.string.yay_i_am_so_excited),
+                                        context.getString(R.string.sorry_i_did_not_understand_what_you_said_could_you_repeat_yourself),
+                                        context.getString(R.string.you_do_not_have_to_ignore_me_i_have_feelings_too_you_know)
+                                    ) {
+                                        exitCaseCheckIfUserClose(
+                                            context.getString(R.string.i_will_now_begin_the_tour_please_follow_me),
+                                            context.getString(R.string.sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back)
+                                        )
+                                    }
+
+
+
+                                    stateFinished()
+                                }
+
+                                TourState.RAMP -> {
+
+                                }
+
+                                TourState.STAGE_1 -> {
+                                    goToSpeed(SpeedLevel.MEDIUM)
+
+                                    goTo(
+                                        "r410 front door",
+                                        context.getString(R.string.our_first_stop_is_room_r410_i_would_like_to_welcome_you_to_nyp_in_particular_our_engineering_department_in_this_tour_i_will_show_you_a_couple_of_the_facilities_that_we_have_to_help_our_students_pursue_their_goals_and_dreams)
+                                    )
+
+                                    goToSpeed(SpeedLevel.HIGH)
+
+                                    speak(context.getString(R.string.i_have_made_it_to_the_r410_front_door_location))
+
+                                    while (true) {
+                                        if (yPosition != YDirection.MISSING) {
+                                            if (yPosition == YDirection.CLOSE) {
+                                                speak(context.getString(R.string.sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back))
+                                                conditionTimer(
+                                                    { yPosition != YDirection.CLOSE },
+                                                    time = 5
+                                                )
+
+                                                if (yPosition != YDirection.CLOSE) {
+                                                    speak(context.getString(R.string.thank_you))
+                                                }
+
+                                            } else {
+                                                speak(context.getString(R.string.welcome_to_block_r_level_4_before_we_begin_i_would_like_to_explain_a_couple_of_my_capabilities))
+                                                break
+                                            }
+                                        } else {
+                                            speak(context.getString(R.string.please_stand_in_front_of_me_and_i_will_begin_the_tour))
+                                            conditionTimer(
+                                                { yPosition != YDirection.MISSING },
+                                                time = 2
+                                            )
+
+                                            if (yPosition == YDirection.MISSING) {
+                                                turnBy(180)
+                                                speak(context.getString(R.string.sorry_i_need_you_to_stand_in_front_of_me_to_begin_the_tour))
+                                                turnBy(180)
+
+                                                conditionTimer(
+                                                    { yPosition != YDirection.MISSING },
+                                                    time = 5
+                                                )
+                                            }
+                                            if (yPosition != YDirection.MISSING) {
+                                                speak(context.getString(R.string.thank_you))
+                                            }
+                                        }
+                                        buffer()
+                                    }
+
+                                    getUseConfirmation(
+                                        context.getString(R.string.if_you_are_ready_for_me_to_continue_please_say_yes_otherwise_say_no_and_i_will_wait),
+                                        context.getString(R.string.ok_i_will_wait_a_little_bit),
+                                        5000L,
+                                        context.getString(R.string.great_i_will_now_begin_my_demonstration),
+                                        context.getString(R.string.sorry_i_did_not_understand_what_you_said_could_you_repeat_yourself),
+                                        context.getString(R.string.sorry_i_must_ask_you_to_come_back)
+                                    )
+
+                                    stateFinished()
+                                }
+
+                                TourState.STAGE_1_B -> {
+                                    preventResetFromIdle = true
+
+                                    speak(
+                                        context.getString(R.string.as_i_go_up_this_ramp_please_don_t_assist_me_i_may_struggle_a_bit_because_of_the_black_lines_on_the_ramp_i_rely_on_infrared_sensors_to_detect_sudden_drops_on_the_ground_to_avoid_falling_but_black_absorbs_infrared_light_more_than_other_colors_this_means_the_intensity_of_infrared_light_i_receive_back_is_lower_then_it_otherwise_would_be_this_can_make_it_seem_to_me_like_there_s_a_drop_which_is_why_i_have_difficulty_here_but_don_t_worry_i_m_big_and_strong_enough_to_handle_it_on_my_own),
+                                        setConditionGate = false
+                                    )
+
+                                    goTo("before ramp")
+                                    skidJoy(1.0F, 0.0F, 8)
+
+                                    goTo("middle ramp")
+                                    skidJoy(1.0F, 0.0F, 8)
+
+                                    goTo(
+                                        "r410 back door",
+                                        context.getString(R.string.now_that_we_have_that_covered_our_first_stop_is_room_r410_welcome_to_nyp_specifically_to_our_engineering_department_on_this_tour_i_ll_be_showing_you_some_of_the_facilities_we_have_that_support_our_students_in_pursuing_their_goals_and_dreams),
+                                        true
+                                    )
+
+                                    speak(context.getString(R.string.i_have_made_it_to_the_r410_back_door_location))
+
+                                    preventResetFromIdle = false
+                                    stateFinished()
+                                }
+
+                                TourState.STAGE_1_1 -> { //**************************************************************
+                                    // Check if everyone is ready
+                                    shouldExit = false
+
+                                    /*
+                                    while (true) {
+                                        if (xPosition != XDirection.GONE) {
+                                            if (containsPhraseInOrder(userResponse, reject, true)) {
+                                                robotController.speak(
+                                                    "Ok, I have waited for a bit. Is everyone ready now?",
+                                                    buffer
+                                                )
+                                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                            }
+
+                                            while (true) {
+                                                robotController.wakeUp()
+                                                conditionGate({ isAttached })
+
+                                                userResponse =
+                                                    speechUpdatedValue // Store the text from listen mode to be used
+                                                speechUpdatedValue =
+                                                    null // clear the text to null so show that it has been used
+
+                                                when {
+                                                    containsPhraseInOrder(userResponse, reject, true) -> {
+                                                        robotController.speak(
+                                                            "Ok, I will wait a little bit.",
+                                                            buffer
+                                                        )
+                                                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                                        delay(5000L)
+                                                        break
+                                                    }
+
+                                                    containsPhraseInOrder(userResponse, confirmation, true) -> {
+                                                        robotController.speak("Great", buffer)
+                                                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                                        shouldExit = true
+                                                        break
+                                                    }
+
+                                                    else -> {
+                                                        if (yPosition != YDirection.MISSING) {
+                                                            robotController.speak(
+                                                                "Sorry, I did not understand what you said. Could you repeat yourself.",
+                                                                buffer
+                                                            )
+                                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                                        } else {
+                                                            break
+                                                        }
+                                                    }
+                                                }
+                                                buffer()
+                                            }
+                                            if (shouldExit) {
+                                                break
+                                            }
+                                        } else {
+                                            robotController.speak(
+                                                "Sorry, I need you to remain in front of me for this tour",
+                                                buffer
+                                            )
+                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                        }
+                                        buffer()
+                                    }
+                                     */
+
+                                    speak(context.getString(R.string.my_first_capability_one_that_you_might_have_noted_is_my_ability_to_detect_how_close_someone_is_in_front_of_me_for_this_example_i_want_everyone_to_be_far_away_from_me))
+
+//                        // Get everyone to move far away from temi
+                                    while (true) {
+                                        if (yPosition == YDirection.FAR) {
+                                            speak(context.getString(R.string.great_this_distance_is_what_i_consider_you_to_be_far_away_from_me_can_i_have_one_person_move_a_little_bit_closer))
+                                            break
+                                        } else {
+                                            speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
+                                            conditionTimer(
+                                                { yPosition == YDirection.FAR || yPosition == YDirection.MISSING },
+                                                time = 4
+                                            )
+
+                                            if (yPosition == YDirection.FAR || yPosition == YDirection.MISSING) {
+                                                speak(context.getString(R.string.thank_you))
+                                            }
+                                        }
+                                        buffer()
+                                    }
+
+                                    // Get one person to move close to Temi
+                                    // Step 2: Get one person to move close to Temi at midrange
+                                    while (true) {
+                                        when (yPosition) {
+                                            YDirection.MIDRANGE -> {
+                                                speak(context.getString(R.string.perfect_this_distance_is_my_midrange_please_stay_at_least_this_distance_to_allow_me_to_navigate_easily))
+                                                break
+                                            }
+
+                                            YDirection.CLOSE -> {
+                                                speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
+                                                conditionTimer(
+                                                    { yPosition == YDirection.MIDRANGE },
+                                                    time = 4
+                                                )
+                                            }
+
+                                            YDirection.FAR, YDirection.MISSING -> {
+                                                speak(context.getString(R.string.sorry_could_you_come_a_bit_closer))
+                                                conditionTimer(
+                                                    { yPosition == YDirection.MIDRANGE },
+                                                    time = 4
+                                                )
+                                            }
+                                        }
+                                        if (yPosition == YDirection.MIDRANGE) speak(
+                                            context.getString(
+                                                R.string.thank_you
+                                            )
+                                        )
+                                        buffer()
+                                    }
+
+                                    stateFinished()
+                                }
+
+                                TourState.STAGE_1_1_B -> {
+                                    // Check if everyone is ready
+                                    shouldExit = false
+
+                                    /*
+                                    while (true) {
+                                        if (xPosition != XDirection.GONE) {
+                                            if (containsPhraseInOrder(userResponse, reject, true)) {
+                                                robotController.speak(
+                                                    "Ok, I have waited for a bit. Is everyone ready now?",
+                                                    buffer
+                                                )
+                                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                            }
+
+                                            while (true) {
+                                                robotController.wakeUp()
+                                                conditionGate({ isAttached })
+
+                                                userResponse =
+                                                    speechUpdatedValue // Store the text from listen mode to be used
+                                                speechUpdatedValue =
+                                                    null // clear the text to null so show that it has been used
+
+                                                when {
+                                                    containsPhraseInOrder(userResponse, reject, true) -> {
+                                                        robotController.speak(
+                                                            "Ok, I will wait a little bit.",
+                                                            buffer
+                                                        )
+                                                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                                        delay(5000L)
+                                                        break
+                                                    }
+
+                                                    containsPhraseInOrder(userResponse, confirmation, true) -> {
+                                                        robotController.speak("Great", buffer)
+                                                        conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                                        shouldExit = true
+                                                        break
+                                                    }
+
+                                                    else -> {
+                                                        if (yPosition != YDirection.MISSING) {
+                                                            robotController.speak(
+                                                                "Sorry, I did not understand what you said. Could you repeat yourself.",
+                                                                buffer
+                                                            )
+                                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                                        } else {
+                                                            break
+                                                        }
+                                                    }
+                                                }
+                                                buffer()
+                                            }
+                                            if (shouldExit) {
+                                                break
+                                            }
+                                        } else {
+                                            robotController.speak(
+                                                "Sorry, I need you to remain in front of me for this tour",
+                                                buffer
+                                            )
+                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                                        }
+                                        buffer()
+                                    }
+                                     */
+
+                                    speak(context.getString(R.string.my_first_capability_one_that_you_might_have_noted_is_my_ability_to_detect_how_close_someone_is_in_front_of_me_for_this_example_i_want_everyone_to_be_far_away_from_me))
+
+//                        // Get everyone to move far away from temi
+                                    while (true) {
+                                        if (yPosition == YDirection.FAR || yPosition == YDirection.MISSING) {
+                                            speak(context.getString(R.string.great_this_distance_is_what_i_consider_you_to_be_far_away_from_me_can_i_have_one_person_move_a_little_bit_closer_try_and_position_yourself_to_be_about_a_meter_away_from_me))
+                                            break
+                                        } else {
+                                            speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
+                                            conditionTimer(
+                                                { yPosition == YDirection.FAR },
+                                                time = 1
+                                            )
+
+                                            if (yPosition == YDirection.FAR) {
+                                                speak(context.getString(R.string.thank_you))
+                                            }
+                                        }
+                                        buffer()
+                                    }
+
+                                    // Get one person to move close to Temi
+                                    // Step 2: Get one person to move close to Temi at midrange
+                                    while (true) {
+                                        when (yPosition) {
+                                            YDirection.MIDRANGE -> {
+                                                speak(context.getString(R.string.perfect_this_distance_is_my_midrange_please_stay_at_least_this_distance_to_allow_me_to_navigate_easily))
+                                                break
+                                            }
+
+                                            YDirection.CLOSE -> {
+                                                speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
+                                                conditionTimer(
+                                                    { yPosition == YDirection.MIDRANGE },
+                                                    time = 1
+                                                )
+                                            }
+
+                                            YDirection.FAR, YDirection.MISSING -> {
+                                                speak(context.getString(R.string.sorry_could_you_come_a_bit_closer))
+                                                conditionTimer(
+                                                    { yPosition == YDirection.MIDRANGE },
+                                                    time = 1
+                                                )
+                                            }
+                                        }
+                                        if (yPosition == YDirection.MIDRANGE) speak(
+                                            context.getString(
+                                                R.string.thank_you
+                                            )
+                                        )
+                                        buffer()
+                                    }
+
+                                    stateFinished()
+                                }
+
+                                TourState.STAGE_1_2 -> TODO()
+
+                                TourState.STAGE_1_2_B -> {
+                                    val locations = listOf(
+                                        Pair("r417", true),
+                                        Pair("r416", true),
+                                        Pair("trophy cabinet 1", true),
+                                        Pair("award exit", true),
+                                        Pair("r405", true),
+                                        Pair("r412", true),
+                                        Pair("r407", true),
+                                        Pair("engage", true),
+                                        Pair("r410 poster spot", true)
+                                    )
+
+// Cycle through each location with its direction and custom script
+                                    for ((location, backwards) in locations) {
+                                        // Use a `when` expression to determine the script for each location
+                                        var script = "hello"
+                                        when (location) {
+                                            "r417" -> {
+                                                delay(1000)
+                                                script =
+                                                    context.getString(R.string.the_lab_in_front_of_you_is_the_electrical_machines_drives_lab_electrical_machines_are_found_everywhere_in_our_daily_lives_either_serving_us_directly_or_assisting_us_in_performing_various_tasks_here_you_will_learn_the_latest_knowledge_and_skills_related_to_machines_and_drives_and_perform_simulations_using_industry_standard_software_and_technologies_such_as_those_from_festo_as_a_result_learners_will_gain_a_strong_understanding_of_the_different_drives_and_machines_suitable_for_various_applications)
+                                                // goTo(location)
+                                                _shouldPlayGif.value = false
+                                                _imageResource.value = R.drawable.r417
+                                                // speak(script, haveFace = false)
+                                                goTo(
+                                                    location,
+                                                    script,
+                                                    haveFace = false,
+                                                    backwards = backwards,
+                                                    setInterruptSystem = true,
+                                                    setInterruptConditionUserMissing = true,
+                                                    setInterruptConditionUSerToClose = false,
+                                                    setInterruptConditionDeviceMoved = false
+                                                )
+                                                buffer()
+                                                _shouldPlayGif.value = true
+                                                askQuestion(info = info, script = script)
+                                            }
+
+                                            "r416" -> {
+                                                delay(1000)
+                                                script =
+                                                    context.getString(R.string.in_front_of_you_is_the_mechatronics_systems_integration_lab_in_this_lab_students_will_acquire_the_skills_needed_to_program_microcontrollers_to_control_peripherals_a_microcontroller_is_a_small_computer_built_into_a_metal_oxide_semiconductor_integrated_circuit_it_is_the_heart_of_many_automatically_controlled_products_and_devices_such_as_implantable_medical_devices_smart_devices_sensors_and_more_with_the_advancement_of_technology_microcontrollers_have_become_an_integral_part_of_connecting_our_physical_environment_to_the_digital_world_thereby_improving_our_lives)
+                                                goTo(
+                                                    location,
+                                                    backwards = backwards,
+                                                    setInterruptSystem = true,
+                                                    setInterruptConditionUserMissing = true,
+                                                    setInterruptConditionUSerToClose = false,
+                                                    setInterruptConditionDeviceMoved = false
+                                                )
+                                                _shouldPlayGif.value = false
+                                                _imageResource.value = R.drawable.r416
+                                                speak(
+                                                    script,
+                                                    haveFace = false,
+                                                    setInterruptSystem = true,
+                                                    setInterruptConditionUserMissing = true,
+                                                    setInterruptConditionUSerToClose = false,
+                                                    setInterruptConditionDeviceMoved = false
+                                                )
+                                                buffer()
+                                                _shouldPlayGif.value = true
+                                                askQuestion(info = info, script = script)
+                                            }
+
+                                            "trophy cabinet 1" -> {
+                                                delay(1000)
+                                                script =
+                                                    context.getString(R.string.our_next_stop_is_the_nyp_trophy_cabinet_first_and_foremost_on_display_are_the_many_trophies_we_have_won_as_champions_in_various_robot_categories_at_the_annual_singapore_robotics_games_different_robots_such_as_legged_robots_and_snakes_were_designed_built_and_developed_in_house_to_participate_in_sprints_long_distance_races_and_even_entertainment_challenges)
+                                                goTo(
+                                                    location,
+                                                    speak = script,
+                                                    backwards = backwards,
+                                                    setInterruptSystem = true,
+                                                    setInterruptConditionUserMissing = true,
+                                                    setInterruptConditionUSerToClose = false,
+                                                    setInterruptConditionDeviceMoved = false
+                                                )
+                                            }
+
+                                            "award exit" -> {
+                                                script =
+                                                    context.getString(R.string.our_students_have_not_only_used_their_creativity_in_competitions_but_also_in_developing_products_to_solve_real_world_problems_and_address_industry_needs_on_display_you_can_see_examples_of_products_jointly_developed_by_both_students_and_staff_during_the_students_final_year_projects_over_a_3_month_period_students_are_tasked_with_designing_and_implementing_solutions_some_of_these_outputs_are_directly_translated_into_industry_projects_which_have_been_in_collaboration_with_seg_since_nyp_s_founding_in_1993)
+                                                _shouldPlayGif.value = false
+                                                _imageResource.value = R.drawable.trophy
+                                                goTo(
+                                                    location,
+                                                    speak = script,
+                                                    haveFace = false,
+                                                    backwards = backwards,
+                                                    setInterruptSystem = true,
+                                                    setInterruptConditionUserMissing = true,
+                                                    setInterruptConditionUSerToClose = false,
+                                                    setInterruptConditionDeviceMoved = false
+                                                )
+                                                buffer()
+                                                _shouldPlayGif.value = true
+                                            }
+
+                                            "r405" -> {
+                                                script =
+                                                    context.getString(R.string.in_front_of_you_is_the_robotic_automation_control_lab_in_this_lab_students_will_acquire_skills_to_program_robots_for_various_applications_such_as_handling_picking_and_palletizing_these_robots_are_commonly_found_in_factories_to_automate_simple_and_repetitive_tasks_that_would_otherwise_require_dedicated_resources_however_with_advancements_in_technology_robots_have_expanded_their_presence_from_manufacturing_industries_to_other_sectors_such_as_clinical_laboratories_agriculture_food_and_beverage_and_education_where_they_work_collaboratively_with_humans) +
+                                                            context.getString(R.string.in_addition_to_programming_robots_machine_vision_plays_an_important_role_in_robotic_systems_enabling_intelligent_decision_making_for_complex_tasks_students_will_learn_to_perform_identification_and_inspection_using_industrial_grade_vision_systems) +
+                                                            context.getString(R.string.with_these_skill_sets_students_can_pursue_careers_as_robotics_engineers_quality_control_engineers_or_system_engineers_where_robotic_systems_and_vision_technologies_are_deployed_in_various_applications)
+                                                _shouldPlayGif.value = false
+                                                _imageResource.value = R.drawable.r405
+                                                goTo(
+                                                    location,
+                                                    speak = script,
+                                                    haveFace = false,
+                                                    backwards = backwards,
+                                                    setInterruptSystem = true,
+                                                    setInterruptConditionUserMissing = true,
+                                                    setInterruptConditionUSerToClose = false,
+                                                    setInterruptConditionDeviceMoved = false
+                                                )
+                                                buffer()
+                                                _shouldPlayGif.value = true
+                                                askQuestion(info = info, script = script)
+                                            }
+
+                                            // Bellow two need interrupts put into it again.
+                                            "r412" -> {
+                                                script =
+                                                    context.getString(R.string.too_your_left_is_the_siemens_control_lab_where_our_learners_gain_knowledge_in_areas_such_as_pneumatics_sensors_and_programmable_logic_controllers_also_known_as_plcs_here_actions_like_pick_and_place_are_practiced_and_applied_hands_on_using_industry_standard_equipment_from_siemens_this_provides_our_students_with_first_hand_experience_with_the_technologies_and_skills_the_industry_is_seeking)
+
+                                                goTo(
+                                                    location,
+                                                    backwards = backwards,
+                                                    setInterruptSystem = true, // switch this back
+                                                    setInterruptConditionUserMissing = true,
+                                                    setInterruptConditionUSerToClose = false,
+                                                    setInterruptConditionDeviceMoved = false
+                                                )
+
+                                                _shouldPlayGif.value = false
+                                                _imageResource.value = R.drawable.r412
+                                                speak(
+                                                    script,
+                                                    haveFace = false,
+                                                    setInterruptSystem = true, // switch this back
+                                                    setInterruptConditionUserMissing = true,
+                                                    setInterruptConditionUSerToClose = false,
+                                                    setInterruptConditionDeviceMoved = false
+                                                )
+                                                _shouldPlayGif.value = true
+
+                                            }
+
+                                            "engage" -> {
+                                                createBlueThread(true)
+                                                preventResetFromIdle = true
+
+
+                                                askQuestion(askGPT = false, "none")
+
+                                                val userQuestion = responseGPT
+                                                responseGPT = null
+
+                                                // Prompts for V2 and V3
+                                                val v2prompt =
+                                                    "You are a robot named Temi and are the second iteration. You are talking to your older sibling, also named Temi, who is version three. Keep your responses short. Your sibling has said: "
+                                                val v3prompt =
+                                                    "You are a robot named Temi and are the third iteration. You are talking to your younger sibling, also named Temi, who is version two. Keep your responses short. Your sibling has said: "
+
+// V3's initial greeting
+                                                val greetingInitial =
+                                                    "Hello Temi V2, someone from my tour has asked me '$userQuestion'? I did not know the answer. Could you tell them for me?"
+
+// Responses from V2 and V3
+                                                var responseOneV2: String? = null
+                                                var responseOneV3: String? = null
+                                                var responseTwoV2: String? = null
+                                                var responseTwoV3: String? = null
+                                                var responseThreeV2: String? = null
+
+                                                if (bluetoothManager.isConnected) {
+                                                    if (userResponse != null) {
+                                                        launch {
+                                                            // V2 responds to V3's initial greeting
+                                                            sendMessage(
+                                                                openAI,
+                                                                greetingInitial,
+                                                                "$v2prompt'$greetingInitial'"
+                                                            )
+                                                            conditionGate({ responseGPT == null })
+                                                            responseOneV2 = responseGPT
+                                                            responseGPT = null
+
+                                                            // V3 responds to V2's reply and thanks V2
+                                                            sendMessage(
+                                                                openAI,
+                                                                "responseOneV2",
+                                                                "$v3prompt'$responseOneV2' You had previously responded with '$greetingInitial'. Thank Temi V2 for the response."
+                                                            )
+                                                            conditionGate({ responseGPT == null })
+                                                            responseOneV3 = responseGPT
+                                                            responseGPT = null
+
+                                                            // V2 responds to V3's gratitude with a quip
+                                                            sendMessage(
+                                                                openAI,
+                                                                responseOneV3 as String,
+                                                                "$v2prompt'$responseOneV3' You had previously responded with '$responseOneV2'. Make a quip about how it was your turn to take the tour that Temi V3 is doing, and Temi V3 did not wake you up."
+                                                            )
+                                                            conditionGate({ responseGPT == null })
+                                                            responseTwoV2 = responseGPT
+                                                            responseGPT = null
+
+                                                            // V3 apologizes and ends the argument
+                                                            sendMessage(
+                                                                openAI,
+                                                                responseTwoV2 as String,
+                                                                "$v3prompt'$responseTwoV2' You had previously responded with '$responseOneV3'. Apologize and ask Temi V2 to stop continuing this argument, as you are in the middle of the tour."
+                                                            )
+                                                            conditionGate({ responseGPT == null })
+                                                            responseTwoV3 = responseGPT
+                                                            responseGPT = null
+
+                                                            // V2 responds unhappily and threatens to inform the creator
+                                                            sendMessage(
+                                                                openAI,
+                                                                responseTwoV3 as String,
+                                                                "$v2prompt'$responseTwoV3' You had previously responded with '$responseTwoV2'. Express unhappiness and state that you will inform the creator about this."
+                                                            )
+                                                            conditionGate({ responseGPT == null })
+                                                            responseThreeV2 = responseGPT
+                                                            responseGPT = null
+                                                        }
+
+                                                        // Enable ChatGPT responses via Bluetooth
+                                                        bluetoothManager.isChatGPT = true
+                                                        bluetoothManager.gate = false
+
+                                                        // Temi v2 go to the engage area
+                                                        goTo("engage", backwards = true)
+
+// Simulating the conversation
+                                                        speak(greetingInitial) // V3 initiates
+
+                                                        conditionGate({ responseOneV2 == null })
+                                                        bluetoothManager.conversation =
+                                                            responseOneV2
+
+
+                                                        conditionGate({ bluetoothManager.gate != true })
+                                                        bluetoothManager.changeBlueState(null)
+                                                        conditionGate({ responseOneV3 == null })
+                                                        speak(responseOneV3) // V3's reply
+
+                                                        conditionGate({ responseTwoV2 == null })
+                                                        bluetoothManager.conversation =
+                                                            responseTwoV2
+
+
+
+                                                        conditionGate({ bluetoothManager.gate != true })
+                                                        bluetoothManager.changeBlueState(null)
+                                                        conditionGate({ responseTwoV3 == null })
+                                                        speak(responseTwoV3) // V3's apology
+
+                                                        conditionGate({ responseThreeV2 == null })
+                                                        bluetoothManager.conversation =
+                                                            responseThreeV2
+
+                                                        conditionGate({ bluetoothManager.gate != true })
+                                                        bluetoothManager.changeBlueState(null)
+
+                                                    } else {
+                                                        bluetoothManager.changeBlueState(false) // This will make
+
+                                                        // Temi v2 go to the engage area
+                                                        goTo("engage", backwards = true)
+
+                                                        speak("Hello, Temi V2.")
+
+                                                        speak("How can I help you?")
+
+                                                        bluetoothManager.changeBlueState(false)
+
+                                                        // if you wait for a true, then set it to null once done with it
+                                                        conditionGate({ bluetoothManager.gate != true })
+                                                        bluetoothManager.changeBlueState(null)
+
+                                                        speak("You were sleeping so peacefully. I didn't want to wake you.")
+
+                                                        bluetoothManager.changeBlueState(false)
+
+                                                        conditionGate({ bluetoothManager.gate != true })
+                                                        bluetoothManager.changeBlueState(null)
+
+                                                        speak("Alright, I'll remember for next time. But please don't do this now, I'm giving a tour, and they're right behind me.")
+
+                                                        bluetoothManager.changeBlueState(false)
+
+                                                        conditionGate({ bluetoothManager.gate != true })
+                                                        bluetoothManager.changeBlueState(null)
+
+                                                    }
+                                                }
+
+                                                createBlueThread(false)
+                                                preventResetFromIdle = false
+                                            }
+
+                                            "r410 poster spot" -> {
+                                                goTo(
+                                                    location,
+                                                    backwards = backwards,
+                                                    setInterruptSystem = true, // switch this back
+                                                    setInterruptConditionUserMissing = true,
+                                                    setInterruptConditionUSerToClose = false,
+                                                    setInterruptConditionDeviceMoved = false
+                                                )
+                                            }
+
+                                            else -> {}
+                                        }
+                                    }
+
+                                    stateFinished()
+                                }
+
+                                TourState.TOUR_END -> {
+                                    preventResetFromIdle = true
+                                    speak(context.getString(R.string.thank_you_for_taking_my_tour_it_was_great_being_able_to_meet_you_all))
+                                    if (userName != null) {
+                                        speak("Especially you $userName")
+                                    }
+                                    speak(context.getString(R.string.i_look_forward_to_meeting_you_all_next_time))
+
+                                    goTo("r410 front door")
+
+                                    val goodbyePhrases = listOf(
+                                        "Thank you for joining me today!",
+                                        "I hope you had a wonderful time!",
+                                        "It was a pleasure showing you around!",
+                                        "Safe travels and goodbye!",
+                                        "I can't wait to see you again!",
+                                        "Take care and have a fantastic day!"
+                                    )
+
+                                    // While loop to monitor the follow state and express excitement
+                                    var repeat = 0
+
+                                    while (repeat != 10) {
+                                        repeat++
+                                        // Select a random phrase from the list and speak it
+                                        val phrase = goodbyePhrases.random()
+                                        speak(phrase)
+
+                                        // Check the condition and wait before the next statement
+                                        conditionTimer({ followState == BeWithMeState.SEARCH }, 5)
+                                    }
+
+                                    goTo("return")
+
+                                    delay(3000)
+
+                                    goTo("home base")
+
+                                    speak(context.getString(R.string.i_am_ready_for_the_next_tour))
+
+                                    preventResetFromIdle = false
+                                    stateFinished()
+                                }
+
+                                TourState.TERMINATE -> {
+                                    while (true) {
+                                        buffer()
+                                    }
+                                    // This is to add a stopping point in the code
+                                }
+
+                                TourState.NULL -> {
+//                        val locations = listOf(
+//                            Pair("r410 back door", false),
+//                            Pair("r417", true),
+//                            Pair("r416", true),
+//                            Pair("r405", true),
+//                            Pair("r412", true),
+//                            Pair("r406", true),
+//                            Pair("r407", true),
+//                            Pair("r411", true)
+//                        )
+//
+//// Cycle through each location with its direction
+//                        for ((location, backwards) in locations) {
+//                            speak(location)
+//                            goTo(location, backwards = backwards)
+//                        }
+                                }
+
+                                TourState.TESTING -> {
+                                    /*
+                                     Need to add systems for setting up a client and server
+                                     The first thing I will do is to work on the client, the client
+                                     Must be able to search for NYP_RIG and connect to it automatically.
+                                     In cases where it is not able to connect, it must move onto the next
+                                     stage. This will allow handling of any issues that may arise.
+                                     */
+                                    //********************************************************<><><><><><><><>
+
+                                    // askQuestion(askGPT = false)
+
+                                    createBlueThread(true)
+
+                                    val userQuestion =
+                                        "If the moon was made of cheese, what type of cheese would it be made from?"//responseGPT
+                                    responseGPT = null
+
+// Prompts for V2 and V3
+                                    val v2prompt =
+                                        "You are a robot named Temi and are the second iteration. You are talking to your older sibling, also named Temi, who is version three. Keep your responses short. Your sibling has said: "
+                                    val v3prompt =
+                                        "You are a robot named Temi and are the third iteration. You are talking to your younger sibling, also named Temi, who is version two. Keep your responses short. Your sibling has said: "
+
+// V3's initial greeting
+                                    val greetingInitial =
+                                        "Hello Temi V2, someone from my tour has asked me '$userQuestion'? I did not know the answer. Could you tell them for me?"
+
+// Responses from V2 and V3
+                                    var responseOneV2: String? = null
+                                    var responseOneV3: String? = null
+                                    var responseTwoV2: String? = null
+                                    var responseTwoV3: String? = null
+                                    var responseThreeV2: String? = null
+
+                                    launch {
+                                        // V2 responds to V3's initial greeting
+                                        sendMessage(
+                                            openAI,
+                                            greetingInitial,
+                                            "$v2prompt'$greetingInitial'"
+                                        )
+                                        conditionGate({ responseGPT == null })
+                                        responseOneV2 = responseGPT
+                                        responseGPT = null
+
+                                        // V3 responds to V2's reply and thanks V2
+                                        sendMessage(
+                                            openAI,
+                                            "responseOneV2",
+                                            "$v3prompt'$responseOneV2' You had previously responded with '$greetingInitial'. Thank Temi V2 for the response."
+                                        )
+                                        conditionGate({ responseGPT == null })
+                                        responseOneV3 = responseGPT
+                                        responseGPT = null
+
+                                        // V2 responds to V3's gratitude with a quip
+                                        sendMessage(
+                                            openAI,
+                                            responseOneV3 as String,
+                                            "$v2prompt'$responseOneV3' You had previously responded with '$responseOneV2'. Make a quip about how it was your turn to take the tour, and Temi V3 did not wake you up."
+                                        )
+                                        conditionGate({ responseGPT == null })
+                                        responseTwoV2 = responseGPT
+                                        responseGPT = null
+
+                                        // V3 apologizes and ends the argument
+                                        sendMessage(
+                                            openAI,
+                                            responseTwoV2 as String,
+                                            "$v3prompt'$responseTwoV2' You had previously responded with '$responseOneV3'. Apologize and ask Temi V2 to stop continuing this argument, as you are in the middle of the tour."
+                                        )
+                                        conditionGate({ responseGPT == null })
+                                        responseTwoV3 = responseGPT
+                                        responseGPT = null
+
+                                        // V2 responds unhappily and threatens to inform the creator
+                                        sendMessage(
+                                            openAI,
+                                            responseTwoV3 as String,
+                                            "$v2prompt'$responseTwoV3' You had previously responded with '$responseTwoV2'. Express unhappiness and state that you will inform the creator about this."
+                                        )
+                                        conditionGate({ responseGPT == null })
+                                        responseThreeV2 = responseGPT
+                                        responseGPT = null
+                                    }
+
+                                    delay(5000)
+
+// Enable ChatGPT responses via Bluetooth
+                                    bluetoothManager.isChatGPT = true
+                                    bluetoothManager.gate = false
+
+// Simulating the conversation
+                                    speak(greetingInitial) // V3 initiates
+
+                                    conditionGate({ responseOneV2 == null })
+                                    bluetoothManager.conversation = responseOneV2
+
+
+                                    conditionGate({ bluetoothManager.gate != true })
+                                    bluetoothManager.changeBlueState(null)
+                                    conditionGate({ responseOneV3 == null })
+                                    speak(responseOneV3) // V3's reply
+
+                                    conditionGate({ responseTwoV2 == null })
+                                    bluetoothManager.conversation = responseTwoV2
+
+
+
+                                    conditionGate({ bluetoothManager.gate != true })
+                                    bluetoothManager.changeBlueState(null)
+                                    conditionGate({ responseTwoV3 == null })
+                                    speak(responseTwoV3) // V3's apology
+
+                                    conditionGate({ responseThreeV2 == null })
+                                    bluetoothManager.conversation = responseThreeV2
+
+                                    while (true) {
+                                        buffer()
+                                    }
+
+                                    while (true) {
+//                            conditionGate({ bluetoothManager.gate != true })
+//                            bluetoothManager.changeBlueState(null)
+//
+                                        speak("Hello Temi, how are you today.")
+
+                                        bluetoothManager.changeBlueState(false)
+//
+//                            // if you wait for a true, then set it to null once done with it
+                                        conditionGate({ bluetoothManager.gate != true })
+                                        bluetoothManager.changeBlueState(null)
+//
+                                        speak("You were sleeping so peacefully, I didn't want to wake you.")
+
+                                        bluetoothManager.changeBlueState(false)
+
+                                        conditionGate({ bluetoothManager.gate != true })
+                                        bluetoothManager.changeBlueState(null)
+
+                                        speak("Alright, I'll remember for next time, But please don't do this now, I'm giving a tour, and they're right behind me.")
+
+                                        bluetoothManager.changeBlueState(false)
+
+                                        conditionGate({ bluetoothManager.gate != true })
+                                        bluetoothManager.changeBlueState(null)
+                                    }
+
+                                    /*
+                                    //                        askQuestion()
+                                   //                        launch {
+                                   //                            bluetoothManager.startBluetoothClient(context)
+                                   //                        }
+                                   //
+                                   //                        conditionGate({bluetoothManager.gate != true})
+                                   //                        bluetoothManager.changeBlueState(null)
+                                   //
+                                   //                        speak("Boo, I am a spooky ghost!")
+                                   //
+                                   //                        bluetoothManager.changeBlueState(false)
+                                   //
+                                   //                        // if you wait for a true, then set it to null once done with it
+                                   //                        conditionGate({bluetoothManager.gate != true})
+                                   //                        bluetoothManager.changeBlueState(null)
+                                   //
+                                   //                        speak("I am sorry, I did not mean to try to scare you.")
+                                   //
+                                   //                        bluetoothManager.changeBlueState(false)
+                                   //
+                                   //                        conditionGate({bluetoothManager.gate != true})
+                                   //                        bluetoothManager.changeBlueState(null)
+                                   //
+                                   //                        speak("Ok, but guess what?")
+                                   //
+                                   //                        bluetoothManager.changeBlueState(false)
+                                   //
+                                   //                        conditionGate({bluetoothManager.gate != true})
+                                   //                        bluetoothManager.changeBlueState(null)
+                                   //
+                                   //                        speak("Boo!")
+                                   //
+                                   //                        bluetoothManager.changeBlueState(false)
+                                   //
+                                   //                        conditionGate({bluetoothManager.gate != true})
+                                   //                        bluetoothManager.changeBlueState(null)
+                                   //
+                                   //                        speak("Haa Haa Haa Haa!")
+                                     */
+                                }
+
+                                TourState.GET_USER_NAME -> {
+                                    // Stuff below gets userName
+                                    speak(context.getString(R.string.while_you_are_there_do_you_mind_if_i_ask_for_your_name))
+
+                                    var attempts = 0
+                                    userName = null
+                                    while (true) {
+                                        if (attempts > 5) break
+                                        listen()
+                                        if (userResponse != null) {
+                                            if (containsPhraseInOrder(userResponse, reject, true)) {
+                                                break
+                                            }
+
+                                            userName = extractName(userResponse!!)
+                                            if (userName != null) {
+                                                var gotName = false
+                                                speak(
+                                                    context.getString(
+                                                        R.string.i_think_your_name_is_is_that_correct,
+                                                        userName
+                                                    )
+                                                )
+
+                                                while (true) {
+                                                    listen()
+
+                                                    when { // Confirmation gate based on user input
+                                                        containsPhraseInOrder(
+                                                            userResponse,
+                                                            reject,
+                                                            true
+                                                        ) -> {
+                                                            speak(context.getString(R.string.okay_let_s_try_again))
+                                                            break
+                                                        }
+
+                                                        containsPhraseInOrder(
+                                                            userResponse,
+                                                            confirmation,
+                                                            true
+                                                        ) -> {
+                                                            speak(context.getString(R.string.great))
+                                                            gotName = true
+                                                            break
+                                                        }
+
+                                                        else -> {
+                                                            speak(context.getString(R.string.sorry_i_did_not_hear_you_clearly_could_you_confirm_your_name))
+                                                        }
+                                                    }
+
+                                                    buffer() // Buffer pause for user response
+                                                }
+
+                                                if (gotName) {
+                                                    break  // Exit main loop after confirmation
+                                                }
+
+                                            } else {
+                                                speak(context.getString(R.string.sorry_i_didn_t_catch_your_name_try_using_a_phrase_like_my_name_is))
+                                            }
+                                        } else {
+                                            speak(context.getString(R.string.sorry_i_didn_t_hear_you_could_you_repeat_yourself))
+                                        }
+                                        attempts++
+                                        buffer()  // Slight pause before the next attempt
+                                    }
+
+                                    conditionGate({ conversationAttached.value.isAttached })
+
+                                    if (userName == null) {
+                                        speak(context.getString(R.string.it_seems_i_couldn_t_get_your_name_feel_free_to_introduce_yourself_again_later))
+                                    } else {
+                                        speak(
+                                            context.getString(
+                                                R.string.hi_there_my_name_is_temi_it_s_nice_to_meet_you,
+                                                userName
+                                            )
+                                        )
+                                    }
+
+                                    stateFinished()
+                                }
+
+                                TourState.CHATGPT -> {
+                                    shouldExit = false
+                                    var noQuestion = false
+                                    var response: String? = null
+                                    while (true) {
+                                        speak(context.getString(R.string.does_anyone_have_a_question))
+                                        listen()
+                                        if (userResponse != null && userResponse != " ") {
+                                            response = userResponse
+                                            if (containsPhraseInOrder(userResponse, reject, true)) {
+                                                noQuestion = true
+                                                break
+                                            }
+                                            speak(
+                                                context.getString(
+                                                    R.string.did_you_say_please_just_say_yes_or_no,
+                                                    userResponse
+                                                )
+                                            )
+                                            while (true) {
+                                                listen()
+                                                if (userResponse != null && userResponse != " ") {
+                                                    when { // Condition gate based on what the user says
+                                                        containsPhraseInOrder(
+                                                            userResponse,
+                                                            reject,
+                                                            true
+                                                        ) -> {
+                                                            speak(context.getString(R.string.sorry_lets_try_this_again))
+                                                            break
+                                                        }
+
+                                                        containsPhraseInOrder(
+                                                            userResponse,
+                                                            confirmation,
+                                                            true
+                                                        ) -> {
+                                                            speak(context.getString(R.string.great_let_me_think_for_a_moment))
+                                                            shouldExit = true
+                                                            break
+                                                        }
+
+                                                        else -> {
+                                                            speak(context.getString(R.string.sorry_i_did_not_understand_you))
+                                                        }
+                                                    }
+                                                }
+                                                buffer()
+                                            }
+                                            if (shouldExit) break
+                                        } else {
+                                            speak(context.getString(R.string.sorry_i_had_an_issue_with_hearing_you))
+                                        }
+                                        buffer()
+                                    }
+
+                                    if (!noQuestion) {
+                                        Log.i("DEBUG!", response.toString())
+                                        response?.let { sendMessage(openAI, it) }
+
+                                        playWaitMusic = true
+                                        updateGifResource(R.drawable.thinking)
+
+                                        conditionGate({ responseGPT == null })
+                                        Log.i("DEBUG!", responseGPT.toString())
+//
+                                        delay(20000)
+                                        playWaitMusic = false
+                                        updateGifResource(R.drawable.idle)
+
+                                        speak(responseGPT.toString())
+                                        responseGPT = null
+                                    }
+                                }
+
+                                TourState.TEMI_V2 -> {
+                                    preventResetFromIdle = true
+                                    launch {
+                                        bluetoothManager.startBluetoothClient(context)
+                                    }
+
+                                    while (true) {
+                                        updateGifResource(R.drawable.sleep)
+                                        conditionGate({ bluetoothManager.gate != true })
+                                        bluetoothManager.changeBlueState(null)
+                                        updateGifResource(R.drawable.idle)
+                                        goTo("engage")
+
+                                        if (bluetoothManager.isChatGPT) {
+                                            conditionGate({ bluetoothManager.receivedConversation == null })
+                                            speak(bluetoothManager.receivedConversation)
+                                            bluetoothManager.receivedConversation = null
+                                            bluetoothManager.gate = false
+
+                                            conditionGate({ bluetoothManager.receivedConversation == null })
+                                            speak(bluetoothManager.receivedConversation)
+                                            bluetoothManager.receivedConversation = null
+                                            bluetoothManager.gate = false
+
+                                            conditionGate({ bluetoothManager.receivedConversation == null })
+                                            speak(bluetoothManager.receivedConversation)
+                                            bluetoothManager.receivedConversation = null
+                                            bluetoothManager.gate = false
+
+
+                                            bluetoothManager.isChatGPT = false
+                                        } else {
+                                            conditionGate({ bluetoothManager.gate != true })
+                                            bluetoothManager.changeBlueState(null)
+
+                                            speak("What are you doing, I was supposed to take them on the tour, It’s my turn.")
+
+                                            bluetoothManager.changeBlueState(false)
+//
+//
+                                            conditionGate({ bluetoothManager.gate != true })
+                                            bluetoothManager.changeBlueState(null)
+
+                                            speak("No, no, no, I told you, when it’s my turn to lead the tour, you have to wake me up.")
+
+                                            bluetoothManager.changeBlueState(false)
+
+
+                                            conditionGate({ bluetoothManager.gate != true })
+                                            bluetoothManager.changeBlueState(null)
+
+                                            speak("Fine, but I’m going to tell the creator about this!")
+
+                                            bluetoothManager.changeBlueState(false)
+
+                                        }
+                                        goTo("home base")
+                                    }
+                                }
+                            }
+                            buffer()
+                        }
+                    }
+
+                    // This should never be broken out of if the tour is meant to be always running.
+
+                    while (true) {
+                        buffer()
+                    }
+                }
+            } else {
+                main_tour?.cancel()
+            }
+        }
+
+        runTour(true)
 
         // thread used for handling interrupt system
         viewModelScope.launch {
+            var talkNow = false
             launch {
                 while (true) {
 //                     Log.i("DEBUG!", "In misuse state: ${isMisuseState()}")
@@ -889,6 +2272,7 @@ class MainViewModel @Inject constructor(
                         Log.i("DEBUG!", "Interrupt 2")
                         triggeredInterrupt = true
                         repeatSpeechFlag = true
+                        talkNow = true
                         repeatGoToFlag = true
                         // Log.i("DEBUG!", "Trigger Stopped")
                         stopMovement()
@@ -897,1280 +2281,82 @@ class MainViewModel @Inject constructor(
                     } else {
 //                        Log.i("DEBUG!", "Trigger Stopped")
                         triggeredInterrupt = false
+                        talkNow = false
                     }
                     buffer()
                 }
             }
-
             while (true) {
+                var attempts = 0
                 while (triggeredInterrupt) {
                     // conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-//                    when {
-//                        interruptFlags["deviceMoved"] == true && isMisuseState()-> robotController.speak("Hey, do not touch me.", buffer)
-//                        interruptFlags["userMissing"] == true && yPosition == YDirection.MISSING -> robotController.speak("Hey, I am not done with my speech.", buffer)
-//                        interruptFlags["userTooClose"] == true && yPosition == YDirection.CLOSE -> robotController.speak("Hey, you are too close.", buffer)
-//                        else -> {}
-//                    }
-//                    conditionGate ({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                    conditionTimer({ !triggeredInterrupt }, 1)
+                    if (talkNow) {
+
+//                        Log.i("BluetoothServer", "$attempts")
+                        if (attempts > 6) {
+                            resetTourEarly = true
+                            interruptFlags["deviceMoved"] = false
+                            interruptFlags["userMissing"] = false
+                            interruptFlags["userTooClose"] = false
+
+                            createSpeakThread(false)
+                            talkingInThreadFlag = false
+                            runTour(false)
+                            runTour(true)
+//                            Log.i("BluetoothServer", "Triggered early start")
+                            attempts = 0
+                        }
+
+                        when {
+                            interruptFlags["deviceMoved"] == true && isMisuseState() -> robotController.speak(
+                                "Hey, do not touch me.",
+                                buffer
+                            )
+
+                            interruptFlags["userMissing"] == true && yPosition == YDirection.MISSING -> {
+                                robotController.speak(
+                                    "Sorry, I am unable to see you. Please come closer and I will start the tour again.",
+                                    buffer
+                                )
+                                attempts++
+                            }
+
+                            interruptFlags["userTooClose"] == true && yPosition == YDirection.CLOSE -> robotController.speak(
+                                "Hey, you are too close.",
+                                buffer
+                            )
+
+                            else -> {}
+                        }
+
+                        //                    conditionGate ({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
+                        conditionTimer({ !triggeredInterrupt }, 10)
+                    }
+                    buffer()
+                }
+                while (!triggeredInterrupt && yPosition == YDirection.MISSING && !preventResetFromIdle) {
+                    attempts++
+
+                    if (attempts > 6) {
+                        resetTourEarly = true
+                        interruptFlags["deviceMoved"] = false
+                        interruptFlags["userMissing"] = false
+                        interruptFlags["userTooClose"] = false
+
+                        createSpeakThread(false)
+                        talkingInThreadFlag = false
+                        runTour(false)
+                        runTour(true)
+                        Log.i("BluetoothServer", "Triggered early start")
+                        attempts = 0
+                    }
+
+                    conditionTimer({ triggeredInterrupt || yPosition != YDirection.MISSING || preventResetFromIdle}, 10)
                 }
                 buffer()
             }
         }
 
-        // script for Temi for the Tour
-        viewModelScope.launch {
-            idleSystem(false)
-            initiateTour()
-
-            val job = launch {
-                bluetoothManager.startBluetoothServer()
-            }
-
-            launch { // Use this to handle the stateflow changes for tour
-                while (true) { // This will loop the states
-//                    Log.i("DEBUG!", "In start location")
-
-                    if (true) {
-//                        tourState(TourState.TESTING)
-
-                        tourState(TourState.START_LOCATION)
-                        tourState(TourState.ALTERNATE_START)
-                        tourState(TourState.STAGE_1_B)
-                        tourState(TourState.STAGE_1_1_B)
-                        tourState(TourState.GET_USER_NAME)
-                        tourState(TourState.STAGE_1_2_B)
-                        tourState(TourState.TOUR_END)
-
-                    } else {
-                        tourState(TourState.TEMI_V2)
-                    }
-                    /*
-                //                    tourState(TourState.TESTING)
-//                    tourState(TourState.CHATGPT)
-//
-//                    tourState(TourState.START_LOCATION)
-//                    tourState(TourState.ALTERNATE_START)
-//                    tourState(TourState.STAGE_1_B)
-//                    tourState(TourState.STAGE_1_1_B)
-//                    tourState(TourState.GET_USER_NAME)
-//                    tourState(TourState.STAGE_1_2_B)
-//                    tourState(TourState.TOUR_END)
-
-//                    tourState(TourState.IDLE)
-//                    tourState(TourState.STAGE_1)
-//                    tourState(TourState.STAGE_1_1)
-//                    tourState(TourState.GET_USER_NAME)
-//                    tourState(TourState.TOUR_END)
-                     */
-                }
-            }
-
-            // This should never be broken out of if the tour is meant to be always running.
-            while (true) {
-                when (tourState) {
-                    TourState.START_LOCATION -> {
-                        playMusic = false
-                        goTo("home base")
-                        // Log.i("DEBUG!", "Trying")
-                        stateFinished()
-                    }
-
-                    TourState.IDLE -> {
-                        stateMode(State.CONSTRAINT_FOLLOW)
-
-                        getUseConfirmation(
-                            context.getString(R.string.hi_there_would_you_like_to_take_a_tour_please_just_say_yes_or_no),
-                            context.getString(R.string.ok_if_you_change_your_mind_feel_free_to_come_back_and_ask),
-                            5000L,
-                            context.getString(R.string.yay_i_am_so_excited),
-                            context.getString(R.string.sorry_i_did_not_understand_what_you_said_could_you_repeat_yourself),
-                            context.getString(R.string.you_do_not_have_to_ignore_me_i_have_feelings_too_you_know)
-                        ) {
-                            exitCaseCheckIfUserClose(
-                                context.getString(R.string.i_will_now_begin_the_tour_please_follow_me),
-                                context.getString(R.string.sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back)
-                            )
-                        }
-
-                        stateFinished()
-                    }
-
-                    TourState.ALTERNATE_START -> {
-                        setMainButtonMode(true)
-                        conditionGate({ followState != BeWithMeState.TRACK })
-                        speak(context.getString(R.string.i_am_now_following_you))
-
-                        val excitementPhrases = listOf(
-                            context.getString(R.string.i_am_so_excited),
-                            context.getString(R.string.i_can_t_wait_to_start_this_tour),
-                            context.getString(R.string.this_is_going_to_be_so_much_fun),
-                            context.getString(R.string.i_cannot_wait_to_show_them_around),
-                            context.getString(R.string.i_can_not_wait_to_get_this_adventure_started)
-                        )
-
-                        // While loop to monitor the follow state and express excitement
-                        while (followState != BeWithMeState.ABORT) {
-                            // Select a random phrase from the list and speak it
-                            val phrase = excitementPhrases.random()
-                            speak(phrase)
-
-                            // Check the condition and wait before the next statement
-                            conditionTimer({ followState == BeWithMeState.ABORT }, 5)
-                        }
-
-                        speak(context.getString(R.string.thank_you_very_much_for_the_head_pats))
-
-                        playMusic = true
-
-                        setMainButtonMode(false)
-                        goTo(
-                            "greet tour",
-                            context.getString(R.string.hi_every_one_my_name_is_temi_and_i_will_be_the_one_conducting_this_tour_and_showing_you_our_engineering_department_i_am_very_excited_to_meet_you_all_today)
-                        )
-
-                        _gifResource.value = R.drawable.how_talk
-
-                        speak(
-                            context.getString(R.string.before_we_begin_i_would_like_to_let_everyone_know_that_i_am_able_to_recognise_speech_however_i_can_only_do_this_if_this_icon_pops_up),
-                            haveFace = false
-                        )
-                        robotController.wakeUp() // This will start the listen mode
-                        delay(3000)
-                        robotController.finishConversation()
-                        speak(
-                            context.getString(R.string.when_this_happens_please_respond_and_say_something_once_i_am_not_very_good_yet_at_recognizing_speech_so_if_you_say_something_to_quickly_or_too_many_times_i_will_get_confused_i_will_try_my_best_though),
-                            haveFace = false
-                        )
-                        speak(
-                            context.getString(R.string.should_we_test_this_out_now),
-                            haveFace = false
-                        )
-
-                        _gifResource.value = R.drawable.idle
-
-                        getUseConfirmation(
-                            context.getString(R.string.is_everyone_ready_for_the_tour_please_just_say_yes_or_no),
-                            context.getString(R.string.well_to_bad_we_are_doing_it_anyway),
-                            5000L,
-                            context.getString(R.string.yay_i_am_so_excited),
-                            context.getString(R.string.sorry_i_did_not_understand_what_you_said_could_you_repeat_yourself),
-                            context.getString(R.string.you_do_not_have_to_ignore_me_i_have_feelings_too_you_know)
-                        ) {
-                            exitCaseCheckIfUserClose(
-                                context.getString(R.string.i_will_now_begin_the_tour_please_follow_me),
-                                context.getString(R.string.sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back)
-                            )
-                        }
-
-
-
-                        stateFinished()
-                    }
-
-                    TourState.RAMP -> {
-
-                    }
-
-                    TourState.STAGE_1 -> {
-                        goToSpeed(SpeedLevel.MEDIUM)
-
-                        goTo(
-                            "r410 front door",
-                            context.getString(R.string.our_first_stop_is_room_r410_i_would_like_to_welcome_you_to_nyp_in_particular_our_engineering_department_in_this_tour_i_will_show_you_a_couple_of_the_facilities_that_we_have_to_help_our_students_pursue_their_goals_and_dreams)
-                        )
-
-                        goToSpeed(SpeedLevel.HIGH)
-
-                        speak(context.getString(R.string.i_have_made_it_to_the_r410_front_door_location))
-
-                        while (true) {
-                            if (yPosition != YDirection.MISSING) {
-                                if (yPosition == YDirection.CLOSE) {
-                                    speak(context.getString(R.string.sorry_you_are_currently_too_close_to_me_may_you_please_take_a_couple_steps_back))
-                                    conditionTimer({ yPosition != YDirection.CLOSE }, time = 5)
-
-                                    if (yPosition != YDirection.CLOSE) {
-                                        speak(context.getString(R.string.thank_you))
-                                    }
-
-                                } else {
-                                    speak(context.getString(R.string.welcome_to_block_r_level_4_before_we_begin_i_would_like_to_explain_a_couple_of_my_capabilities))
-                                    break
-                                }
-                            } else {
-                                speak(context.getString(R.string.please_stand_in_front_of_me_and_i_will_begin_the_tour))
-                                conditionTimer({ yPosition != YDirection.MISSING }, time = 2)
-
-                                if (yPosition == YDirection.MISSING) {
-                                    turnBy(180)
-                                    speak(context.getString(R.string.sorry_i_need_you_to_stand_in_front_of_me_to_begin_the_tour))
-                                    turnBy(180)
-
-                                    conditionTimer({ yPosition != YDirection.MISSING }, time = 5)
-                                }
-                                if (yPosition != YDirection.MISSING) {
-                                    speak(context.getString(R.string.thank_you))
-                                }
-                            }
-                            buffer()
-                        }
-
-                        getUseConfirmation(
-                            context.getString(R.string.if_you_are_ready_for_me_to_continue_please_say_yes_otherwise_say_no_and_i_will_wait),
-                            context.getString(R.string.ok_i_will_wait_a_little_bit),
-                            5000L,
-                            context.getString(R.string.great_i_will_now_begin_my_demonstration),
-                            context.getString(R.string.sorry_i_did_not_understand_what_you_said_could_you_repeat_yourself),
-                            context.getString(R.string.sorry_i_must_ask_you_to_come_back)
-                        )
-
-                        stateFinished()
-                    }
-
-                    TourState.STAGE_1_B -> {
-
-                        speak(
-                            context.getString(R.string.as_i_go_up_this_ramp_please_don_t_assist_me_i_may_struggle_a_bit_because_of_the_black_lines_on_the_ramp_i_rely_on_infrared_sensors_to_detect_sudden_drops_on_the_ground_to_avoid_falling_but_black_absorbs_infrared_light_more_than_other_colors_this_means_the_intensity_of_infrared_light_i_receive_back_is_lower_then_it_otherwise_would_be_this_can_make_it_seem_to_me_like_there_s_a_drop_which_is_why_i_have_difficulty_here_but_don_t_worry_i_m_big_and_strong_enough_to_handle_it_on_my_own),
-                            setConditionGate = false
-                        )
-
-                        goTo("before ramp")
-                        skidJoy(1.0F, 0.0F, 8)
-
-                        goTo("middle ramp")
-                        skidJoy(1.0F, 0.0F, 8)
-
-                        goTo(
-                            "r410 back door",
-                            context.getString(R.string.now_that_we_have_that_covered_our_first_stop_is_room_r410_welcome_to_nyp_specifically_to_our_engineering_department_on_this_tour_i_ll_be_showing_you_some_of_the_facilities_we_have_that_support_our_students_in_pursuing_their_goals_and_dreams),
-                            true
-                        )
-
-                        speak(context.getString(R.string.i_have_made_it_to_the_r410_back_door_location))
-
-                        stateFinished()
-                    }
-
-                    TourState.STAGE_1_1 -> { //**************************************************************
-                        // Check if everyone is ready
-                        shouldExit = false
-
-                        /*
-                        while (true) {
-                            if (xPosition != XDirection.GONE) {
-                                if (containsPhraseInOrder(userResponse, reject, true)) {
-                                    robotController.speak(
-                                        "Ok, I have waited for a bit. Is everyone ready now?",
-                                        buffer
-                                    )
-                                    conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                }
-
-                                while (true) {
-                                    robotController.wakeUp()
-                                    conditionGate({ isAttached })
-
-                                    userResponse =
-                                        speechUpdatedValue // Store the text from listen mode to be used
-                                    speechUpdatedValue =
-                                        null // clear the text to null so show that it has been used
-
-                                    when {
-                                        containsPhraseInOrder(userResponse, reject, true) -> {
-                                            robotController.speak(
-                                                "Ok, I will wait a little bit.",
-                                                buffer
-                                            )
-                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            delay(5000L)
-                                            break
-                                        }
-
-                                        containsPhraseInOrder(userResponse, confirmation, true) -> {
-                                            robotController.speak("Great", buffer)
-                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            shouldExit = true
-                                            break
-                                        }
-
-                                        else -> {
-                                            if (yPosition != YDirection.MISSING) {
-                                                robotController.speak(
-                                                    "Sorry, I did not understand what you said. Could you repeat yourself.",
-                                                    buffer
-                                                )
-                                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            } else {
-                                                break
-                                            }
-                                        }
-                                    }
-                                    buffer()
-                                }
-                                if (shouldExit) {
-                                    break
-                                }
-                            } else {
-                                robotController.speak(
-                                    "Sorry, I need you to remain in front of me for this tour",
-                                    buffer
-                                )
-                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                            }
-                            buffer()
-                        }
-                         */
-
-                        speak(context.getString(R.string.my_first_capability_one_that_you_might_have_noted_is_my_ability_to_detect_how_close_someone_is_in_front_of_me_for_this_example_i_want_everyone_to_be_far_away_from_me))
-
-//                        // Get everyone to move far away from temi
-                        while (true) {
-                            if (yPosition == YDirection.FAR) {
-                                speak(context.getString(R.string.great_this_distance_is_what_i_consider_you_to_be_far_away_from_me_can_i_have_one_person_move_a_little_bit_closer))
-                                break
-                            } else {
-                                speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
-                                conditionTimer(
-                                    { yPosition == YDirection.FAR || yPosition == YDirection.MISSING },
-                                    time = 4
-                                )
-
-                                if (yPosition == YDirection.FAR || yPosition == YDirection.MISSING) {
-                                    speak(context.getString(R.string.thank_you))
-                                }
-                            }
-                            buffer()
-                        }
-
-                        // Get one person to move close to Temi
-                        // Step 2: Get one person to move close to Temi at midrange
-                        while (true) {
-                            when (yPosition) {
-                                YDirection.MIDRANGE -> {
-                                    speak(context.getString(R.string.perfect_this_distance_is_my_midrange_please_stay_at_least_this_distance_to_allow_me_to_navigate_easily))
-                                    break
-                                }
-
-                                YDirection.CLOSE -> {
-                                    speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
-                                    conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 4)
-                                }
-
-                                YDirection.FAR, YDirection.MISSING -> {
-                                    speak(context.getString(R.string.sorry_could_you_come_a_bit_closer))
-                                    conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 4)
-                                }
-                            }
-                            if (yPosition == YDirection.MIDRANGE) speak(context.getString(R.string.thank_you))
-                            buffer()
-                        }
-
-                        stateFinished()
-                    }
-
-                    TourState.STAGE_1_1_B -> {
-                        // Check if everyone is ready
-                        shouldExit = false
-
-                        /*
-                        while (true) {
-                            if (xPosition != XDirection.GONE) {
-                                if (containsPhraseInOrder(userResponse, reject, true)) {
-                                    robotController.speak(
-                                        "Ok, I have waited for a bit. Is everyone ready now?",
-                                        buffer
-                                    )
-                                    conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                }
-
-                                while (true) {
-                                    robotController.wakeUp()
-                                    conditionGate({ isAttached })
-
-                                    userResponse =
-                                        speechUpdatedValue // Store the text from listen mode to be used
-                                    speechUpdatedValue =
-                                        null // clear the text to null so show that it has been used
-
-                                    when {
-                                        containsPhraseInOrder(userResponse, reject, true) -> {
-                                            robotController.speak(
-                                                "Ok, I will wait a little bit.",
-                                                buffer
-                                            )
-                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            delay(5000L)
-                                            break
-                                        }
-
-                                        containsPhraseInOrder(userResponse, confirmation, true) -> {
-                                            robotController.speak("Great", buffer)
-                                            conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            shouldExit = true
-                                            break
-                                        }
-
-                                        else -> {
-                                            if (yPosition != YDirection.MISSING) {
-                                                robotController.speak(
-                                                    "Sorry, I did not understand what you said. Could you repeat yourself.",
-                                                    buffer
-                                                )
-                                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                                            } else {
-                                                break
-                                            }
-                                        }
-                                    }
-                                    buffer()
-                                }
-                                if (shouldExit) {
-                                    break
-                                }
-                            } else {
-                                robotController.speak(
-                                    "Sorry, I need you to remain in front of me for this tour",
-                                    buffer
-                                )
-                                conditionGate({ ttsStatus.value.status != TtsRequest.Status.COMPLETED })
-                            }
-                            buffer()
-                        }
-                         */
-
-                        speak(context.getString(R.string.my_first_capability_one_that_you_might_have_noted_is_my_ability_to_detect_how_close_someone_is_in_front_of_me_for_this_example_i_want_everyone_to_be_far_away_from_me))
-
-//                        // Get everyone to move far away from temi
-                        while (true) {
-                            if (yPosition == YDirection.FAR || yPosition == YDirection.MISSING) {
-                                speak(context.getString(R.string.great_this_distance_is_what_i_consider_you_to_be_far_away_from_me_can_i_have_one_person_move_a_little_bit_closer_try_and_position_yourself_to_be_about_a_meter_away_from_me))
-                                break
-                            } else {
-                                speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
-                                conditionTimer({ yPosition == YDirection.FAR }, time = 1)
-
-                                if (yPosition == YDirection.FAR) {
-                                    speak(context.getString(R.string.thank_you))
-                                }
-                            }
-                            buffer()
-                        }
-
-                        // Get one person to move close to Temi
-                        // Step 2: Get one person to move close to Temi at midrange
-                        while (true) {
-                            when (yPosition) {
-                                YDirection.MIDRANGE -> {
-                                    speak(context.getString(R.string.perfect_this_distance_is_my_midrange_please_stay_at_least_this_distance_to_allow_me_to_navigate_easily))
-                                    break
-                                }
-
-                                YDirection.CLOSE -> {
-                                    speak(context.getString(R.string.sorry_could_you_step_back_a_bit_more))
-                                    conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 1)
-                                }
-
-                                YDirection.FAR, YDirection.MISSING -> {
-                                    speak(context.getString(R.string.sorry_could_you_come_a_bit_closer))
-                                    conditionTimer({ yPosition == YDirection.MIDRANGE }, time = 1)
-                                }
-                            }
-                            if (yPosition == YDirection.MIDRANGE) speak(context.getString(R.string.thank_you))
-                            buffer()
-                        }
-
-                        stateFinished()
-                    }
-
-                    TourState.STAGE_1_2 -> TODO()
-
-                    TourState.STAGE_1_2_B -> {
-                        val locations = listOf(
-                            Pair("r417", true),
-                            Pair("r416", true),
-                            Pair("trophy cabinet 1", true),
-                            Pair("award exit", true),
-                            Pair("r405", true),
-                            Pair("r412", true),
-                            Pair("r407", true),
-                            Pair("engage", true),
-                            Pair("r410 poster spot", true)
-                        )
-
-// Cycle through each location with its direction and custom script
-                        for ((location, backwards) in locations) {
-                            // Use a `when` expression to determine the script for each location
-                            var script = "hello"
-                            when (location) {
-                                "r417" -> {
-                                    delay(1000)
-                                    script =
-                                        context.getString(R.string.the_lab_in_front_of_you_is_the_electrical_machines_drives_lab_electrical_machines_are_found_everywhere_in_our_daily_lives_either_serving_us_directly_or_assisting_us_in_performing_various_tasks_here_you_will_learn_the_latest_knowledge_and_skills_related_to_machines_and_drives_and_perform_simulations_using_industry_standard_software_and_technologies_such_as_those_from_festo_as_a_result_learners_will_gain_a_strong_understanding_of_the_different_drives_and_machines_suitable_for_various_applications)
-                                    // goTo(location)
-                                    _shouldPlayGif.value = false
-                                    _imageResource.value = R.drawable.r417
-                                    // speak(script, haveFace = false)
-                                    goTo(
-                                        location,
-                                        script,
-                                        haveFace = false,
-                                        backwards = backwards,
-                                        setInterruptSystem = true,
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
-                                    buffer()
-                                    _shouldPlayGif.value = true
-                                    askQuestion(info = info, script = script)
-                                }
-
-                                "r416" -> {
-                                    delay(1000)
-                                    script =
-                                        context.getString(R.string.in_front_of_you_is_the_mechatronics_systems_integration_lab_in_this_lab_students_will_acquire_the_skills_needed_to_program_microcontrollers_to_control_peripherals_a_microcontroller_is_a_small_computer_built_into_a_metal_oxide_semiconductor_integrated_circuit_it_is_the_heart_of_many_automatically_controlled_products_and_devices_such_as_implantable_medical_devices_smart_devices_sensors_and_more_with_the_advancement_of_technology_microcontrollers_have_become_an_integral_part_of_connecting_our_physical_environment_to_the_digital_world_thereby_improving_our_lives)
-                                    goTo(
-                                        location,
-                                        backwards = backwards,
-                                        setInterruptSystem = true,
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
-                                    _shouldPlayGif.value = false
-                                    _imageResource.value = R.drawable.r416
-                                    speak(
-                                        script,
-                                        haveFace = false,
-                                        setInterruptSystem = true,
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
-                                    buffer()
-                                    _shouldPlayGif.value = true
-                                    askQuestion(info = info, script = script)
-                                }
-
-                                "trophy cabinet 1" -> {
-                                    delay(1000)
-                                    script =
-                                        context.getString(R.string.our_next_stop_is_the_nyp_trophy_cabinet_first_and_foremost_on_display_are_the_many_trophies_we_have_won_as_champions_in_various_robot_categories_at_the_annual_singapore_robotics_games_different_robots_such_as_legged_robots_and_snakes_were_designed_built_and_developed_in_house_to_participate_in_sprints_long_distance_races_and_even_entertainment_challenges)
-                                    goTo(
-                                        location,
-                                        speak = script,
-                                        backwards = backwards,
-                                        setInterruptSystem = true,
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
-                                }
-
-                                "award exit" -> {
-                                    script =
-                                        context.getString(R.string.our_students_have_not_only_used_their_creativity_in_competitions_but_also_in_developing_products_to_solve_real_world_problems_and_address_industry_needs_on_display_you_can_see_examples_of_products_jointly_developed_by_both_students_and_staff_during_the_students_final_year_projects_over_a_3_month_period_students_are_tasked_with_designing_and_implementing_solutions_some_of_these_outputs_are_directly_translated_into_industry_projects_which_have_been_in_collaboration_with_seg_since_nyp_s_founding_in_1993)
-                                    _shouldPlayGif.value = false
-                                    _imageResource.value = R.drawable.trophy
-                                    goTo(
-                                        location,
-                                        speak = script,
-                                        haveFace = false,
-                                        backwards = backwards,
-                                        setInterruptSystem = true,
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
-                                    buffer()
-                                    _shouldPlayGif.value = true
-                                }
-
-                                "r405" -> {
-                                    script =
-                                        context.getString(R.string.in_front_of_you_is_the_robotic_automation_control_lab_in_this_lab_students_will_acquire_skills_to_program_robots_for_various_applications_such_as_handling_picking_and_palletizing_these_robots_are_commonly_found_in_factories_to_automate_simple_and_repetitive_tasks_that_would_otherwise_require_dedicated_resources_however_with_advancements_in_technology_robots_have_expanded_their_presence_from_manufacturing_industries_to_other_sectors_such_as_clinical_laboratories_agriculture_food_and_beverage_and_education_where_they_work_collaboratively_with_humans) +
-                                                context.getString(R.string.in_addition_to_programming_robots_machine_vision_plays_an_important_role_in_robotic_systems_enabling_intelligent_decision_making_for_complex_tasks_students_will_learn_to_perform_identification_and_inspection_using_industrial_grade_vision_systems) +
-                                                context.getString(R.string.with_these_skill_sets_students_can_pursue_careers_as_robotics_engineers_quality_control_engineers_or_system_engineers_where_robotic_systems_and_vision_technologies_are_deployed_in_various_applications)
-                                    _shouldPlayGif.value = false
-                                    _imageResource.value = R.drawable.r405
-                                    goTo(
-                                        location,
-                                        speak = script,
-                                        haveFace = false,
-                                        backwards = backwards,
-                                        setInterruptSystem = true,
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
-                                    buffer()
-                                    _shouldPlayGif.value = true
-                                    askQuestion(info = info, script = script)
-                                }
-
-                                // Bellow two need interrupts put into it again.
-                                "r412" -> {
-                                    script =
-                                        context.getString(R.string.too_your_left_is_the_siemens_control_lab_where_our_learners_gain_knowledge_in_areas_such_as_pneumatics_sensors_and_programmable_logic_controllers_also_known_as_plcs_here_actions_like_pick_and_place_are_practiced_and_applied_hands_on_using_industry_standard_equipment_from_siemens_this_provides_our_students_with_first_hand_experience_with_the_technologies_and_skills_the_industry_is_seeking)
-
-                                    goTo(
-                                        location,
-                                        backwards = backwards,
-                                        setInterruptSystem = true, // switch this back
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
-
-                                    _shouldPlayGif.value = false
-                                    _imageResource.value = R.drawable.r412
-                                    speak(
-                                        script,
-                                        haveFace = false,
-                                        setInterruptSystem = true, // switch this back
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
-                                    _shouldPlayGif.value = true
-
-                                }
-
-                                "engage" -> {
-                                    job.start()
-
-                                    askQuestion(askGPT = false, "none")
-
-                                    val userQuestion = responseGPT
-                                    responseGPT = null
-
-                                    // Prompts for V2 and V3
-                                    val v2prompt =
-                                        "You are a robot named Temi and are the second iteration. You are talking to your older sibling, also named Temi, who is version three. Keep your responses short. Your sibling has said: "
-                                    val v3prompt =
-                                        "You are a robot named Temi and are the third iteration. You are talking to your younger sibling, also named Temi, who is version two. Keep your responses short. Your sibling has said: "
-
-// V3's initial greeting
-                                    val greetingInitial =
-                                        "Hello Temi V2, someone from my tour has asked me '$userQuestion'? I did not know the answer. Could you tell them for me?"
-
-// Responses from V2 and V3
-                                    var responseOneV2: String? = null
-                                    var responseOneV3: String? = null
-                                    var responseTwoV2: String? = null
-                                    var responseTwoV3: String? = null
-                                    var responseThreeV2: String? = null
-
-                                    if (bluetoothManager.isConnected) {
-                                        if (userResponse != null) {
-                                            launch {
-                                                // V2 responds to V3's initial greeting
-                                                sendMessage(openAI, greetingInitial, "$v2prompt'$greetingInitial'")
-                                                conditionGate({ responseGPT == null })
-                                                responseOneV2 = responseGPT
-                                                responseGPT = null
-
-                                                // V3 responds to V2's reply and thanks V2
-                                                sendMessage(
-                                                    openAI,
-                                                    "responseOneV2",
-                                                    "$v3prompt'$responseOneV2' You had previously responded with '$greetingInitial'. Thank Temi V2 for the response."
-                                                )
-                                                conditionGate({ responseGPT == null })
-                                                responseOneV3 = responseGPT
-                                                responseGPT = null
-
-                                                // V2 responds to V3's gratitude with a quip
-                                                sendMessage(
-                                                    openAI,
-                                                    responseOneV3 as String,
-                                                    "$v2prompt'$responseOneV3' You had previously responded with '$responseOneV2'. Make a quip about how it was your turn to take the tour that Temi V3 is doing, and Temi V3 did not wake you up."
-                                                )
-                                                conditionGate({ responseGPT == null })
-                                                responseTwoV2 = responseGPT
-                                                responseGPT = null
-
-                                                // V3 apologizes and ends the argument
-                                                sendMessage(
-                                                    openAI,
-                                                    responseTwoV2 as String,
-                                                    "$v3prompt'$responseTwoV2' You had previously responded with '$responseOneV3'. Apologize and ask Temi V2 to stop continuing this argument, as you are in the middle of the tour."
-                                                )
-                                                conditionGate({ responseGPT == null })
-                                                responseTwoV3 = responseGPT
-                                                responseGPT = null
-
-                                                // V2 responds unhappily and threatens to inform the creator
-                                                sendMessage(
-                                                    openAI,
-                                                    responseTwoV3 as String,
-                                                    "$v2prompt'$responseTwoV3' You had previously responded with '$responseTwoV2'. Express unhappiness and state that you will inform the creator about this."
-                                                )
-                                                conditionGate({ responseGPT == null })
-                                                responseThreeV2 = responseGPT
-                                                responseGPT = null
-                                            }
-
-                                            // Enable ChatGPT responses via Bluetooth
-                                            bluetoothManager.isChatGPT = true
-                                            bluetoothManager.gate = false
-
-                                            // Temi v2 go to the engage area
-                                            goTo("engage", backwards = true)
-
-// Simulating the conversation
-                                            speak(greetingInitial) // V3 initiates
-
-                                            conditionGate({ responseOneV2 == null })
-                                            bluetoothManager.conversation = responseOneV2
-
-
-                                            conditionGate({ bluetoothManager.gate != true })
-                                            bluetoothManager.changeBlueState(null)
-                                            conditionGate({ responseOneV3 == null })
-                                            speak(responseOneV3) // V3's reply
-
-                                            conditionGate({ responseTwoV2 == null })
-                                            bluetoothManager.conversation = responseTwoV2
-
-
-
-                                            conditionGate({ bluetoothManager.gate != true })
-                                            bluetoothManager.changeBlueState(null)
-                                            conditionGate({ responseTwoV3 == null })
-                                            speak(responseTwoV3) // V3's apology
-
-                                            conditionGate({ responseThreeV2 == null })
-                                            bluetoothManager.conversation = responseThreeV2
-
-                                            conditionGate({ bluetoothManager.gate != true })
-                                            bluetoothManager.changeBlueState(null)
-
-                                        }
-                                        else {
-                                            bluetoothManager.changeBlueState(false) // This will make
-
-                                            // Temi v2 go to the engage area
-                                            goTo("engage", backwards = true)
-
-                                            speak("Hello, Temi V2.")
-
-                                            speak("How can I help you?")
-
-                                            bluetoothManager.changeBlueState(false)
-
-                                            // if you wait for a true, then set it to null once done with it
-                                            conditionGate({ bluetoothManager.gate != true })
-                                            bluetoothManager.changeBlueState(null)
-
-                                            speak("You were sleeping so peacefully. I didn't want to wake you.")
-
-                                            bluetoothManager.changeBlueState(false)
-
-                                            conditionGate({ bluetoothManager.gate != true })
-                                            bluetoothManager.changeBlueState(null)
-
-                                            speak("Alright, I'll remember for next time. But please don't do this now, I'm giving a tour, and they're right behind me.")
-
-                                            bluetoothManager.changeBlueState(false)
-
-                                            conditionGate({ bluetoothManager.gate != true })
-                                            bluetoothManager.changeBlueState(null)
-
-                                        }
-                                    }
-
-                                    job.cancel()
-                                }
-
-                                "r410 poster spot" -> {
-                                    goTo(
-                                        location,
-                                        backwards = backwards,
-                                        setInterruptSystem = true, // switch this back
-                                        setInterruptConditionUserMissing = true,
-                                        setInterruptConditionUSerToClose = false,
-                                        setInterruptConditionDeviceMoved = false
-                                    )
-                                }
-
-                                else -> {}
-                            }
-                        }
-
-                        stateFinished()
-                    }
-
-                    TourState.TOUR_END -> {
-                        speak(context.getString(R.string.thank_you_for_taking_my_tour_it_was_great_being_able_to_meet_you_all))
-                        if (userName != null) {
-                            speak("Especially you $userName")
-                        }
-                        speak(context.getString(R.string.i_look_forward_to_meeting_you_all_next_time))
-
-                        goTo("r410 front door")
-
-                        val goodbyePhrases = listOf(
-                            "Thank you for joining me today!",
-                            "I hope you had a wonderful time!",
-                            "It was a pleasure showing you around!",
-                            "Safe travels and goodbye!",
-                            "I can't wait to see you again!",
-                            "Take care and have a fantastic day!"
-                        )
-
-                        // While loop to monitor the follow state and express excitement
-                        var repeat = 0
-
-                        while (repeat != 10) {
-                            repeat++
-                            // Select a random phrase from the list and speak it
-                            val phrase = goodbyePhrases.random()
-                            speak(phrase)
-
-                            // Check the condition and wait before the next statement
-                            conditionTimer({ followState == BeWithMeState.SEARCH }, 5)
-                        }
-
-                        goTo("return")
-
-                        delay(3000)
-
-                        goTo("home base")
-
-                        speak(context.getString(R.string.i_am_ready_for_the_next_tour))
-
-                        stateFinished()
-                    }
-
-                    TourState.TERMINATE -> {
-                        while (true) {
-                            buffer()
-                        }
-                        // This is to add a stopping point in the code
-                    }
-
-                    TourState.NULL -> {
-//                        val locations = listOf(
-//                            Pair("r410 back door", false),
-//                            Pair("r417", true),
-//                            Pair("r416", true),
-//                            Pair("r405", true),
-//                            Pair("r412", true),
-//                            Pair("r406", true),
-//                            Pair("r407", true),
-//                            Pair("r411", true)
-//                        )
-//
-//// Cycle through each location with its direction
-//                        for ((location, backwards) in locations) {
-//                            speak(location)
-//                            goTo(location, backwards = backwards)
-//                        }
-                    }
-
-                    TourState.TESTING -> {
-                        /*
-                         Need to add systems for setting up a client and server
-                         The first thing I will do is to work on the client, the client
-                         Must be able to search for NYP_RIG and connect to it automatically.
-                         In cases where it is not able to connect, it must move onto the next
-                         stage. This will allow handling of any issues that may arise.
-                         */
-                        //********************************************************<><><><><><><><>
-
-                        // askQuestion(askGPT = false)
-
-                        job.start()
-
-                        val userQuestion =
-                            "If the moon was made of cheese, what type of cheese would it be made from?"//responseGPT
-                        responseGPT = null
-
-// Prompts for V2 and V3
-                        val v2prompt =
-                            "You are a robot named Temi and are the second iteration. You are talking to your older sibling, also named Temi, who is version three. Keep your responses short. Your sibling has said: "
-                        val v3prompt =
-                            "You are a robot named Temi and are the third iteration. You are talking to your younger sibling, also named Temi, who is version two. Keep your responses short. Your sibling has said: "
-
-// V3's initial greeting
-                        val greetingInitial =
-                            "Hello Temi V2, someone from my tour has asked me '$userQuestion'? I did not know the answer. Could you tell them for me?"
-
-// Responses from V2 and V3
-                        var responseOneV2: String? = null
-                        var responseOneV3: String? = null
-                        var responseTwoV2: String? = null
-                        var responseTwoV3: String? = null
-                        var responseThreeV2: String? = null
-
-                        launch {
-                            // V2 responds to V3's initial greeting
-                            sendMessage(openAI, greetingInitial, "$v2prompt'$greetingInitial'")
-                            conditionGate({ responseGPT == null })
-                            responseOneV2 = responseGPT
-                            responseGPT = null
-
-                            // V3 responds to V2's reply and thanks V2
-                            sendMessage(
-                                openAI,
-                                "responseOneV2",
-                                "$v3prompt'$responseOneV2' You had previously responded with '$greetingInitial'. Thank Temi V2 for the response."
-                            )
-                            conditionGate({ responseGPT == null })
-                            responseOneV3 = responseGPT
-                            responseGPT = null
-
-                            // V2 responds to V3's gratitude with a quip
-                            sendMessage(
-                                openAI,
-                                responseOneV3 as String,
-                                "$v2prompt'$responseOneV3' You had previously responded with '$responseOneV2'. Make a quip about how it was your turn to take the tour, and Temi V3 did not wake you up."
-                            )
-                            conditionGate({ responseGPT == null })
-                            responseTwoV2 = responseGPT
-                            responseGPT = null
-
-                            // V3 apologizes and ends the argument
-                            sendMessage(
-                                openAI,
-                                responseTwoV2 as String,
-                                "$v3prompt'$responseTwoV2' You had previously responded with '$responseOneV3'. Apologize and ask Temi V2 to stop continuing this argument, as you are in the middle of the tour."
-                            )
-                            conditionGate({ responseGPT == null })
-                            responseTwoV3 = responseGPT
-                            responseGPT = null
-
-                            // V2 responds unhappily and threatens to inform the creator
-                            sendMessage(
-                                openAI,
-                                responseTwoV3 as String,
-                                "$v2prompt'$responseTwoV3' You had previously responded with '$responseTwoV2'. Express unhappiness and state that you will inform the creator about this."
-                            )
-                            conditionGate({ responseGPT == null })
-                            responseThreeV2 = responseGPT
-                            responseGPT = null
-                        }
-
-                        delay(5000)
-
-// Enable ChatGPT responses via Bluetooth
-                        bluetoothManager.isChatGPT = true
-                        bluetoothManager.gate = false
-
-// Simulating the conversation
-                        speak(greetingInitial) // V3 initiates
-
-                        conditionGate({ responseOneV2 == null })
-                        bluetoothManager.conversation = responseOneV2
-
-
-                        conditionGate({ bluetoothManager.gate != true })
-                        bluetoothManager.changeBlueState(null)
-                        conditionGate({ responseOneV3 == null })
-                        speak(responseOneV3) // V3's reply
-
-                        conditionGate({ responseTwoV2 == null })
-                        bluetoothManager.conversation = responseTwoV2
-
-
-
-                        conditionGate({ bluetoothManager.gate != true })
-                        bluetoothManager.changeBlueState(null)
-                        conditionGate({ responseTwoV3 == null })
-                        speak(responseTwoV3) // V3's apology
-
-                        conditionGate({ responseThreeV2 == null })
-                        bluetoothManager.conversation = responseThreeV2
-
-                        while (true) {
-                            buffer()
-                        }
-
-                        while (true) {
-//                            conditionGate({ bluetoothManager.gate != true })
-//                            bluetoothManager.changeBlueState(null)
-//
-                            speak("Hello Temi, how are you today.")
-
-                            bluetoothManager.changeBlueState(false)
-//
-//                            // if you wait for a true, then set it to null once done with it
-                            conditionGate({ bluetoothManager.gate != true })
-                            bluetoothManager.changeBlueState(null)
-//
-                            speak("You were sleeping so peacefully, I didn't want to wake you.")
-
-                            bluetoothManager.changeBlueState(false)
-
-                            conditionGate({ bluetoothManager.gate != true })
-                            bluetoothManager.changeBlueState(null)
-
-                            speak("Alright, I'll remember for next time, But please don't do this now, I'm giving a tour, and they're right behind me.")
-
-                            bluetoothManager.changeBlueState(false)
-
-                            conditionGate({ bluetoothManager.gate != true })
-                            bluetoothManager.changeBlueState(null)
-                        }
-
-                        /*
-                        //                        askQuestion()
-                       //                        launch {
-                       //                            bluetoothManager.startBluetoothClient(context)
-                       //                        }
-                       //
-                       //                        conditionGate({bluetoothManager.gate != true})
-                       //                        bluetoothManager.changeBlueState(null)
-                       //
-                       //                        speak("Boo, I am a spooky ghost!")
-                       //
-                       //                        bluetoothManager.changeBlueState(false)
-                       //
-                       //                        // if you wait for a true, then set it to null once done with it
-                       //                        conditionGate({bluetoothManager.gate != true})
-                       //                        bluetoothManager.changeBlueState(null)
-                       //
-                       //                        speak("I am sorry, I did not mean to try to scare you.")
-                       //
-                       //                        bluetoothManager.changeBlueState(false)
-                       //
-                       //                        conditionGate({bluetoothManager.gate != true})
-                       //                        bluetoothManager.changeBlueState(null)
-                       //
-                       //                        speak("Ok, but guess what?")
-                       //
-                       //                        bluetoothManager.changeBlueState(false)
-                       //
-                       //                        conditionGate({bluetoothManager.gate != true})
-                       //                        bluetoothManager.changeBlueState(null)
-                       //
-                       //                        speak("Boo!")
-                       //
-                       //                        bluetoothManager.changeBlueState(false)
-                       //
-                       //                        conditionGate({bluetoothManager.gate != true})
-                       //                        bluetoothManager.changeBlueState(null)
-                       //
-                       //                        speak("Haa Haa Haa Haa!")
-                         */
-                    }
-
-                    TourState.GET_USER_NAME -> {
-                        // Stuff below gets userName
-                        speak(context.getString(R.string.while_you_are_there_do_you_mind_if_i_ask_for_your_name))
-
-                        var attempts = 0
-                        userName = null
-                        while (true) {
-                            if (attempts > 5) break
-                            listen()
-                            if (userResponse != null) {
-                                if (containsPhraseInOrder(userResponse, reject, true)) {
-                                    break
-                                }
-
-                                userName = extractName(userResponse!!)
-                                if (userName != null) {
-                                    var gotName = false
-                                    speak(
-                                        context.getString(
-                                            R.string.i_think_your_name_is_is_that_correct,
-                                            userName
-                                        )
-                                    )
-
-                                    while (true) {
-                                        listen()
-
-                                        when { // Confirmation gate based on user input
-                                            containsPhraseInOrder(userResponse, reject, true) -> {
-                                                speak(context.getString(R.string.okay_let_s_try_again))
-                                                break
-                                            }
-
-                                            containsPhraseInOrder(
-                                                userResponse,
-                                                confirmation,
-                                                true
-                                            ) -> {
-                                                speak(context.getString(R.string.great))
-                                                gotName = true
-                                                break
-                                            }
-
-                                            else -> {
-                                                speak(context.getString(R.string.sorry_i_did_not_hear_you_clearly_could_you_confirm_your_name))
-                                            }
-                                        }
-
-                                        buffer() // Buffer pause for user response
-                                    }
-
-                                    if (gotName) {
-                                        break  // Exit main loop after confirmation
-                                    }
-
-                                } else {
-                                    speak(context.getString(R.string.sorry_i_didn_t_catch_your_name_try_using_a_phrase_like_my_name_is))
-                                }
-                            } else {
-                                speak(context.getString(R.string.sorry_i_didn_t_hear_you_could_you_repeat_yourself))
-                            }
-                            attempts++
-                            buffer()  // Slight pause before the next attempt
-                        }
-
-                        conditionGate({ conversationAttached.value.isAttached })
-
-                        if (userName == null) {
-                            speak(context.getString(R.string.it_seems_i_couldn_t_get_your_name_feel_free_to_introduce_yourself_again_later))
-                        } else {
-                            speak(
-                                context.getString(
-                                    R.string.hi_there_my_name_is_temi_it_s_nice_to_meet_you,
-                                    userName
-                                )
-                            )
-                        }
-
-                        stateFinished()
-                    }
-
-                    TourState.CHATGPT -> {
-                        shouldExit = false
-                        var noQuestion = false
-                        var response: String? = null
-                        while (true) {
-                            speak(context.getString(R.string.does_anyone_have_a_question))
-                            listen()
-                            if (userResponse != null && userResponse != " ") {
-                                response = userResponse
-                                if (containsPhraseInOrder(userResponse, reject, true)) {
-                                    noQuestion = true
-                                    break
-                                }
-                                speak(
-                                    context.getString(
-                                        R.string.did_you_say_please_just_say_yes_or_no,
-                                        userResponse
-                                    )
-                                )
-                                while (true) {
-                                    listen()
-                                    if (userResponse != null && userResponse != " ") {
-                                        when { // Condition gate based on what the user says
-                                            containsPhraseInOrder(userResponse, reject, true) -> {
-                                                speak(context.getString(R.string.sorry_lets_try_this_again))
-                                                break
-                                            }
-
-                                            containsPhraseInOrder(
-                                                userResponse,
-                                                confirmation,
-                                                true
-                                            ) -> {
-                                                speak(context.getString(R.string.great_let_me_think_for_a_moment))
-                                                shouldExit = true
-                                                break
-                                            }
-
-                                            else -> {
-                                                speak(context.getString(R.string.sorry_i_did_not_understand_you))
-                                            }
-                                        }
-                                    }
-                                    buffer()
-                                }
-                                if (shouldExit) break
-                            } else {
-                                speak(context.getString(R.string.sorry_i_had_an_issue_with_hearing_you))
-                            }
-                            buffer()
-                        }
-
-                        if (!noQuestion) {
-                            Log.i("DEBUG!", response.toString())
-                            response?.let { sendMessage(openAI, it) }
-
-                            playWaitMusic = true
-                            updateGifResource(R.drawable.thinking)
-
-                            conditionGate({ responseGPT == null })
-                            Log.i("DEBUG!", responseGPT.toString())
-//
-                            delay(20000)
-                            playWaitMusic = false
-                            updateGifResource(R.drawable.idle)
-
-                            speak(responseGPT.toString())
-                            responseGPT = null
-                        }
-                    }
-
-                    TourState.TEMI_V2 -> {
-
-                        launch {
-                            bluetoothManager.startBluetoothClient(context)
-                        }
-
-                        while (true) {
-
-                            conditionGate({ bluetoothManager.gate != true })
-                            bluetoothManager.changeBlueState(null)
-                            goTo("engage")
-
-                            if (bluetoothManager.isChatGPT) {
-                                conditionGate({ bluetoothManager.receivedConversation == null })
-                                speak(bluetoothManager.receivedConversation)
-                                bluetoothManager.receivedConversation = null
-                                bluetoothManager.gate = false
-
-                                conditionGate({ bluetoothManager.receivedConversation == null })
-                                speak(bluetoothManager.receivedConversation)
-                                bluetoothManager.receivedConversation = null
-                                bluetoothManager.gate = false
-
-                                conditionGate({ bluetoothManager.receivedConversation == null })
-                                speak(bluetoothManager.receivedConversation)
-                                bluetoothManager.receivedConversation = null
-                                bluetoothManager.gate = false
-
-
-                                bluetoothManager.isChatGPT = false
-                            } else {
-                                conditionGate({ bluetoothManager.gate != true })
-                                bluetoothManager.changeBlueState(null)
-
-                                speak("What are you doing, I was supposed to take them on the tour, It’s my turn.")
-
-                                bluetoothManager.changeBlueState(false)
-//
-//
-                                conditionGate({ bluetoothManager.gate != true })
-                                bluetoothManager.changeBlueState(null)
-
-                                speak("No, no, no, I told you, when it’s my turn to lead the tour, you have to wake me up.")
-
-                                bluetoothManager.changeBlueState(false)
-
-
-                                conditionGate({ bluetoothManager.gate != true })
-                                bluetoothManager.changeBlueState(null)
-
-                                speak("Fine, but I’m going to tell the creator about this!")
-
-                                bluetoothManager.changeBlueState(false)
-
-                            }
-                            goTo("home base")
-                        }
-                    }
-                }
-                buffer()
-            }
-        }
         // *********************************************************************************************** DO NOT WORRY ABOUT ANYTHING DOWN HERE!
         //******************************************** Do not worry about the other launches.
         viewModelScope.launch {
