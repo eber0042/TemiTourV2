@@ -19,6 +19,7 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -26,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
@@ -115,6 +117,22 @@ class AudioPlayer(context: Context, private val mediaResId: Int) {
             volume
         )  // Set the same volume for both left and right channels
     }
+
+    // Function to play the audio only once
+    fun playOnce() {
+        // Reset looping and seek to the beginning
+        mediaPlayer.isLooping = false
+        mediaPlayer.seekTo(0)
+
+        // Start the audio
+        mediaPlayer.start()
+
+        // Stop the media player when playback is complete
+        mediaPlayer.setOnCompletionListener {
+            it.seekTo(0) // Reset to the beginning
+            it.setOnCompletionListener(null) // Remove listener to avoid memory leaks
+        }
+    }
 }
 
 @Composable
@@ -123,6 +141,7 @@ fun MainPage(context: Context, lifecycleOwner: LifecycleOwner) {
     val viewModel: MainViewModel = hiltViewModel()
     val themeMusic = AudioPlayer(context, R.raw.greeting1)
     val waitMusic = AudioPlayer(context, R.raw.wait_music)
+    val barkSound = AudioPlayer(context, R.raw.bark) // Load the barking sound
     themeMusic.setVolumeLevel(0.15F)
 
     // Track changes in the imageResource and shouldPlayGif state
@@ -161,13 +180,25 @@ fun MainPage(context: Context, lifecycleOwner: LifecycleOwner) {
     // Conditionally set the image resource based on shouldPlayGif
     val image = if (shouldPlayGif) gifResource else imageResource
 
-    // AsyncImage component to display the image or GIF
     AsyncImage(
         model = image, // Resource or URL of the image/GIF
         contentDescription = if (shouldPlayGif) "Animated GIF" else "Static Image",
         imageLoader = gifEnabledLoader,
-        modifier = Modifier.fillMaxSize(), // Fill the whole screen
+        modifier = Modifier
+            .fillMaxSize() // Fill the whole screen
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        if (gifResource == R.drawable.sleep1) {
+                            // Play the barking sound when gifResource is R.raw.sleepy
+                            barkSound.playOnce()
+                        } else {
+                            // Continue with normal behavior
+                            // You can define additional actions here if needed
+                        }
+                    }
+                )
+            },
         contentScale = ContentScale.Crop // Crop to fit the entire screen
     )
-
 }

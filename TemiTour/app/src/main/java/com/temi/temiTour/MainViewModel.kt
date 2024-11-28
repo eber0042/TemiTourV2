@@ -122,7 +122,7 @@ class MainViewModel @Inject constructor(
     private val buffer = 100L // Used to create delay need to unsure systems work
     private var stateMode = State.NULL // Keep track of system state
     private var defaultAngle =
-        0.0 // 180 + round(Math.toDegrees(robotController.getPositionYaw().toDouble())) // Default angle Temi will go to.
+        270.0 // 180 + round(Math.toDegrees(robotController.getPositionYaw().toDouble())) // Default angle Temi will go to.
     private var boundary = 90.0 // Distance Temi can turn +/- the default angle
     private var userRelativeDirection =
         XDirection.GONE // Used for checking direction user was lost
@@ -926,11 +926,10 @@ class MainViewModel @Inject constructor(
                             while (true) { // This will loop the states
 //                    Log.i("DEBUG!", "In start location")
 
-                                if (false) {
+                                if (true) {
 //                        tourState(TourState.TESTING)
-
                                     tourState(TourState.START_LOCATION)
-                                    tourState(TourState.ALTERNATE_START)
+                                    tourState(TourState.IDLE)
                                     tourState(TourState.STAGE_1_B)
                                     tourState(TourState.STAGE_1_1_B)
                                     tourState(TourState.GET_USER_NAME)
@@ -967,7 +966,8 @@ class MainViewModel @Inject constructor(
                                 TourState.START_LOCATION -> {
                                     preventResetFromIdle = true
                                     playMusic = false
-                                    goTo("home base")
+//                                    goTo("home base")
+                                    goTo("idle spot")
                                     // Log.i("DEBUG!", "Trying")
                                     preventResetFromIdle = false
                                     stateFinished()
@@ -975,6 +975,7 @@ class MainViewModel @Inject constructor(
 
                                 TourState.IDLE -> {
                                     preventResetFromIdle = true
+                                    goTo("idle spot")
                                     stateMode(State.CONSTRAINT_FOLLOW)
 
                                     getUseConfirmation(
@@ -1779,11 +1780,9 @@ class MainViewModel @Inject constructor(
                                         conditionTimer({ followState == BeWithMeState.SEARCH }, 5)
                                     }
 
-                                    goTo("return")
-
-                                    delay(3000)
-
-                                    goTo("home base")
+//                                    goTo("return")
+//
+//                                    delay(3000)
 
                                     speak(context.getString(R.string.i_am_ready_for_the_next_tour))
 
@@ -2175,7 +2174,7 @@ class MainViewModel @Inject constructor(
                                     }
 
                                     while (true) {
-                                        updateGifResource(R.drawable.sleep)
+                                        updateGifResource(R.drawable.sleep1)
                                         conditionGate({ bluetoothManager.gate != true })
                                         bluetoothManager.changeBlueState(null)
                                         updateGifResource(R.drawable.idle)

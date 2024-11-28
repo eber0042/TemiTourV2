@@ -437,7 +437,7 @@ class RobotController():
         robot.setTtsVoice(ttsVoice = TtsVoice(Gender.FEMALE, 1.1F, 4))
         robot.setDetectionModeOn(on = true, distance = 2.0f) // Set how far it can detect stuff
         robot.setKioskModeOn(on = false)
-        robot.volume = 6// set volume to 4
+        robot.volume = 8// set volume to 4
 
         robot.setHardButtonMode(HardButton.VOLUME, HardButton.Mode.DISABLED)
         robot.setHardButtonMode(HardButton.MAIN, HardButton.Mode.DISABLED)
